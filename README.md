@@ -1,0 +1,134 @@
+# Express Map
+
+**Visual route, middleware, and template navigation for Express.js apps — right inside VS Code.**
+
+Express Map statically analyses your Express application and renders an interactive tree of every route, middleware layer, and template file. No running server needed, no configuration required — just open your project and the map appears.
+
+---
+
+## Features
+
+### Route Tree
+All routes are grouped by path prefix and displayed with their HTTP method, resolved path, source file, and middleware chain. Click any route to jump to its definition.
+
+### Template Navigation
+`res.render('some/view')` calls become clickable links — hold **Cmd** (macOS) or **Ctrl** (Windows/Linux) and click the template name in your source file to open the template directly.
+
+### CodeLens
+Route metadata appears inline above each handler function:
+
+```
+GET /admin/users · 2 middleware · renders admin/users
+```
+
+Click the CodeLens label to reveal that route in the Express Map panel.
+
+### Auto-Reveal
+As you move the cursor through a route file, the corresponding route is highlighted in the tree automatically.
+
+### Broken Reference Detection
+Routes that call `res.render('some/view')` where `some/view` doesn't exist in the views directory are flagged:
+- Red squiggle on the `res.render()` call
+- Entry in the **Problems** panel
+- Listed under **Broken References** in the tree
+
+### Potential Issues
+Async route handlers that have no `try/catch` block are highlighted with a warning — unhandled rejections crash the server in Node.js.
+
+### Orphaned Templates
+Template files that are never referenced by any `res.render()` call appear under **Orphaned Templates**.
+
+### Duplicate Routes
+Multiple handlers registered for the same `METHOD /path` combination are grouped under **Duplicate Routes**.
+
+### Copilot Integration
+Express Map registers a **Copilot language model tool** that gives the AI a structured understanding of your entire Express app — routes, templates, broken refs, async issues, duplicates, and orphans — without you having to describe any of it manually.
+
+**Privacy-first by design.** The tool only runs when you explicitly reference it in a Copilot Chat message:
+
+```
+@workspace #express-map_analyzeApp what routes are missing error handling?
+```
+
+It will **never** send your app's data to the model automatically or in the background. Your route paths, file structure, and template names stay local until you choose to share them with the AI.
+
+**What it sends when invoked:**
+- All route methods and resolved paths (e.g. `GET /admin/payments`)
+- Source file paths (relative) and line numbers
+- Template names referenced by each route
+- Async and error-handling flags per route
+- Broken template references, duplicate routes, orphaned templates
+- Express version and async-safety status
+
+**What it never sends:** source code content, environment variables, secrets, or any runtime data.
+
+---
+
+## Supported Template Engines
+
+EJS, Pug/Jade, Handlebars/HBS, Mustache, Nunjucks, Twig, Liquid, Eta. Unknown engines are detected automatically by inspecting the views directory.
+
+---
+
+## Requirements
+
+- VS Code 1.118 or later
+- An Express.js project with a `package.json` in the workspace root
+- Entry point discovered via `package.json` `"main"` field, or one of: `app.js`, `server.js`, `index.js`
+- **Express 4 or 5** — both fully supported
+
+No configuration is needed. Express Map discovers your app's entry point, views directory, and template engine automatically via `app.set()` calls.
+
+---
+
+## Express Version Compatibility
+
+| Feature | Express 4 | Express 5 |
+|---|---|---|
+| Route tree, CodeLens, template links | ✓ | ✓ |
+| `{:param}` optional params (path-to-regexp v8) | — | ✓ |
+| `{*name}` named wildcards | — | ✓ |
+| Array mount paths `app.use(['/a', '/b'], fn)` | — | ✓ |
+| Async errors caught by framework | No — warnings shown | Yes — warnings suppressed |
+
+The detected Express version is shown in the status bar tooltip. If you are on Express 4 and want to suppress the async-without-try/catch warnings, install `express-async-errors` or upgrade to Express 5.
+
+---
+
+## Extension Settings
+
+Express Map has no user-configurable settings.
+
+---
+
+## How It Works
+
+Express Map uses Babel's parser to perform static AST analysis — it reads your source files but never executes them. It:
+
+1. Finds your Express entry point via `package.json#main` or common filenames
+2. Follows `require()` / `import` statements to discover sub-routers
+3. Detects `app.set('views', ...)` and `app.set('view engine', ...)` calls
+4. Records every `app.get/post/put/patch/delete/use(...)` call with its full path prefix stack
+5. Scans the views directory for template files and cross-references them with `res.render()` calls
+
+---
+
+## Known Limitations
+
+- **Dynamic route paths**: Template literals like `` `/${section}/page` `` are converted to `/:section/page`; fully dynamic paths (variables, computed expressions) appear as `[varName]`
+- **Dynamic render calls**: `res.render(view)` where `view` is a variable can't be statically resolved (the render ref is collected via object property scanning as a best-effort)
+- **Re-exported routers**: Routers exported through index files with re-exports may not always be followed
+- **Array-mounted sub-routers**: `app.use(['/a', '/b'], router)` — the router is analysed once per mount path for route listing, but because file analysis is deduplicated, only the first path is used when routes inside share the same file. The first path wins.
+- **No runtime analysis**: Middleware conditionally registered at runtime won't be detected
+
+---
+
+## Release Notes
+
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE)
