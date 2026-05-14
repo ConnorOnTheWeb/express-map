@@ -813,6 +813,75 @@ function detectExpressSetup(workspaceRoot: string): { expressVersion: string; as
   }
 }
 
+// ─── multi-root helpers ───────────────────────────────────────────────────────
+
+function hasExpressDependency(dir: string): boolean {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf-8')) as Record<string, unknown>;
+    const deps = {
+      ...((pkg['dependencies'] as Record<string, unknown>) ?? {}),
+      ...((pkg['devDependencies'] as Record<string, unknown>) ?? {}),
+    };
+    return 'express' in deps;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns the Express project roots reachable from `workspaceRoot`.
+ * If the root itself lists express as a dependency, returns `[workspaceRoot]`.
+ * Otherwise scans one level of sub-directories for folders that do — this
+ * covers the common case of opening a parent directory that contains several
+ * Express apps (e.g. a monorepo or a `/projects/` folder).
+ */
+export function findExpressRoots(workspaceRoot: string): string[] {
+  if (hasExpressDependency(workspaceRoot)) {
+    return [workspaceRoot];
+  }
+  const roots: string[] = [];
+  try {
+    const entries = fs.readdirSync(workspaceRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) { continue; }
+      if (entry.name.startsWith('.') || entry.name === 'node_modules') { continue; }
+      const subdir = path.join(workspaceRoot, entry.name);
+      if (hasExpressDependency(subdir)) { roots.push(subdir); }
+    }
+  } catch { /* directory not readable */ }
+  return roots;
+}
+
+/**
+ * Merges multiple per-root `ExpressApp` results into one combined result.
+ * Duplicate-route detection is preserved per-project so routes that share the
+ * same path across different apps are NOT incorrectly flagged as duplicates.
+ */
+export function mergeExpressApps(apps: ExpressApp[]): ExpressApp {
+  if (apps.length === 0) {
+    return {
+      routes: [], middleware: [], templates: [], orphanedTemplates: [],
+      duplicateRoutes: [], brokenRefs: [], viewsDir: '', viewEngine: '',
+      expressVersion: '', asyncErrorsSafe: false,
+    };
+  }
+  if (apps.length === 1) { return apps[0]; }
+  return {
+    routes:           apps.flatMap(a => a.routes),
+    middleware:       apps.flatMap(a => a.middleware),
+    templates:        apps.flatMap(a => a.templates),
+    orphanedTemplates: apps.flatMap(a => a.orphanedTemplates),
+    duplicateRoutes:  apps.flatMap(a => a.duplicateRoutes),
+    brokenRefs:       apps.flatMap(a => a.brokenRefs),
+    viewsDir:         apps.find(a => a.viewsDir)?.viewsDir ?? '',
+    viewEngine:       apps.find(a => a.viewEngine)?.viewEngine ?? '',
+    expressVersion:   apps.find(a => a.expressVersion)?.expressVersion ?? '',
+    // Conservative AND: any Express 4 project without an async patch means
+    // "async without try/catch" warnings should still be shown for that project.
+    asyncErrorsSafe:  apps.every(a => a.asyncErrorsSafe),
+  };
+}
+
 export async function analyzeWorkspace(workspaceRoot: string): Promise<ExpressApp> {
   const empty: ExpressApp = {
     routes: [],

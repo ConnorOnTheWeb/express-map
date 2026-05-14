@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { analyzeWorkspace } from './analyzer';
+import { analyzeWorkspace, findExpressRoots, mergeExpressApps } from './analyzer';
 import { ExpressMapProvider, ExpressMapItem } from './treeProvider';
 import type { ExpressApp, Route, Template } from './types';
 
@@ -67,8 +67,6 @@ function updateDiagnostics(
 // ─── activate ────────────────────────────────────────────────────────────────
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-
   // ── Tree provider ──────────────────────────────────────────────────────────
   const provider = new ExpressMapProvider();
 
@@ -105,7 +103,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let lastTemplatesByName = new Map<string, Template>();
 
   async function runAnalysis(): Promise<void> {
-    if (!workspaceFolder) {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
       provider.setNoAppFound();
       statusBar.text = '$(warning) No workspace';
       statusBar.tooltip = 'Express Map: no workspace folder open';
@@ -113,10 +112,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return;
     }
 
-    const root = workspaceFolder.uri.fsPath;
-    let result;
+    // Collect Express project roots from every workspace folder (Option 2) and
+    // their immediate sub-directories (Option 3) so that both multi-root
+    // workspaces and parent-directory windows work out of the box.
+    const expressRoots: string[] = [];
+    for (const folder of folders) {
+      for (const root of findExpressRoots(folder.uri.fsPath)) {
+        if (!expressRoots.includes(root)) { expressRoots.push(root); }
+      }
+    }
+
+    if (expressRoots.length === 0) {
+      provider.setNoAppFound();
+      diagnosticCollection.clear();
+      statusBar.text = '$(warning) No Express app found';
+      statusBar.tooltip = 'Express Map: no Express entry point detected in workspace';
+      treeView.badge = undefined;
+      return;
+    }
+
+    let results: ExpressApp[];
     try {
-      result = await analyzeWorkspace(root);
+      results = await Promise.all(expressRoots.map(root => analyzeWorkspace(root)));
     } catch (err) {
       provider.setNoAppFound();
       statusBar.text = '$(warning) Analysis failed';
@@ -126,6 +143,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       treeView.badge = undefined;
       return;
     }
+
+    const result = mergeExpressApps(results);
 
     if (result.routes.length === 0) {
       provider.setNoAppFound();
@@ -176,14 +195,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // ── File watcher with debounce ─────────────────────────────────────────────
-  if (workspaceFolder) {
-    // Broad pattern covers JS/TS source and all known template engine extensions.
-    // Being broad is safe — extra triggers just re-run static analysis.
-    const pattern = new vscode.RelativePattern(
-      workspaceFolder,
+  // A global watcher (no RelativePattern) automatically covers every workspace
+  // folder including ones added later via multi-root workspaces.
+  {
+    const watcher = vscode.workspace.createFileSystemWatcher(
       '**/*.{js,ts,mjs,cjs,ejs,pug,jade,hbs,handlebars,mustache,njk,twig,liquid,eta}',
     );
-    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
     let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
     const onFileChange = (): void => {
@@ -200,6 +217,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     watcher.onDidDelete(onFileChange, undefined, context.subscriptions);
     context.subscriptions.push(watcher);
   }
+
+  // Re-analyse when workspace folders are added or removed
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      runAnalysis().catch(err =>
+        console.error('[Express Map] Workspace-folders-change analysis error:', err),
+      );
+    }),
+  );
 
   // ── Template document links (click on res.render strings opens template file) ───
   // DocumentLinkProvider lets us control the exact underline range so the full
@@ -347,11 +373,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           ]);
         }
 
-        const workspaceRoot = workspaceFolder?.uri.fsPath ?? '';
+        const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
         const relativePath = (abs: string): string =>
-          abs.startsWith(workspaceRoot)
-            ? abs.slice(workspaceRoot.length).replace(/\\/g, '/').replace(/^\//, '')
-            : abs;
+          vscode.workspace.asRelativePath(abs, multiRoot);
 
         const summary = {
           summary: {
