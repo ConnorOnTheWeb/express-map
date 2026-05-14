@@ -1,8 +1,8 @@
 # Express Map
 
-**Visual route, middleware, and template navigation for Express.js apps — right inside VS Code.**
+**Visual route, middleware, and template navigation for Express.js apps inside VS Code and IDEs forked from VSC.**
 
-Express Map statically analyses your Express application and renders an interactive tree of every route, middleware layer, and template file. No running server needed, no configuration required — just open your project and the map appears.
+Express Map statically analyses your Express application and renders an interactive tree of every route, middleware layer, and template file. No running server needed, no configuration required - just open your project and the map appears.
 
 ---
 
