@@ -59,6 +59,37 @@ Express Map works whether you open a single Express project, a multi-root VS Cod
 
 Single-project windows show the existing flat layout unchanged.
 
+### Route Grouping
+Click the **$(list-filter) grouping icon** in the panel header to cycle between three route-grouping modes:
+
+| Mode | Groups routes by… |
+|------|-------------------|
+| **By Prefix** *(default)* | first path segment (`/users`, `/admin`, …) |
+| **By File** | source file where the route is defined |
+| **By Method** | HTTP method (GET, POST, PUT, PATCH, DELETE, …) |
+
+Example — **By File**:
+```
+▶ Routes  12
+    ▶ routes/users.js   4 routes
+        GET  /users
+        POST /users
+        GET  /users/:id
+        DEL  /users/:id
+    ▶ routes/admin.js   8 routes
+        …
+```
+
+Example — **By Method**:
+```
+▶ Routes  12
+    ▶ GET    6 routes
+    ▶ POST   3 routes
+    ▶ DELETE 3 routes
+```
+
+The selected mode is saved and restored across VS Code sessions.
+
 ### Route Search
 Press **Cmd+Shift+F** (macOS) / **Ctrl+Shift+F** (Windows/Linux) with the Express Map panel focused, or click the **$(search) search icon** in the panel header, to open a fuzzy Quick Pick over all routes. You can search by:
 - HTTP method (`GET`, `POST`, …)

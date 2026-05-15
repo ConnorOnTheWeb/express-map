@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { analyzeWorkspace, findExpressRoots, mergeExpressApps } from './analyzer';
 import { ExpressMapProvider, ExpressMapItem } from './treeProvider';
+import type { Grouping } from './treeProvider';
 import type { ExpressApp, Route, Template } from './types';
 
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -73,7 +74,8 @@ function updateDiagnostics(
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   // ── Tree provider ──────────────────────────────────────────────────────────
-  const provider = new ExpressMapProvider();
+  const savedGrouping = (context.globalState.get<string>('expressMap.treeGrouping') ?? 'prefix') as Grouping;
+  const provider = new ExpressMapProvider(savedGrouping);
 
   const treeView = vscode.window.createTreeView<ExpressMapItem>(TREE_VIEW_ID, {
     treeDataProvider: provider,
@@ -299,6 +301,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       vscode.env.clipboard.writeText(route.resolvedPath).then(() => {
         vscode.window.setStatusBarMessage(`$(copy) Copied: ${route.resolvedPath}`, 2000);
       }, () => { /* clipboard unavailable */ });
+    }),
+  );
+  // ── Change grouping command (Quick Pick) ────────────────────────────────────
+  context.subscriptions.push(
+    vscode.commands.registerCommand('expressMap.changeGrouping', async () => {
+      const current = provider.getGrouping();
+      const options: Array<{ label: string; description: string; value: Grouping }> = [
+        { label: '$(list-tree)\u00a0 By Prefix', description: 'Group by first path segment', value: 'prefix' },
+        { label: '$(file-code)\u00a0 By File',   description: 'Group by source file',        value: 'file' },
+        { label: '$(symbol-method)\u00a0 By Method', description: 'Group by HTTP method (GET, POST…)', value: 'method' },
+      ];
+      const picked = await vscode.window.showQuickPick(
+        options.map(o => ({ ...o, detail: o.value === current ? '$(check) current' : undefined })),
+        { placeHolder: 'Group routes by…' },
+      );
+      if (!picked) { return; }
+      provider.setGrouping(picked.value);
+      context.globalState.update('expressMap.treeGrouping', picked.value);
     }),
   );
   // ── Search routes command (Quick Pick) ──────────────────────────────────

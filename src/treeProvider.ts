@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import type { ExpressApp, Route, MiddlewareEntry, Template, OrphanedTemplate, RouteRef, BrokenRef } from './types';
 
+export type Grouping = 'prefix' | 'file' | 'method';
+
 // ─── item kinds ───────────────────────────────────────────────────────────────
 
 type ItemKind =
@@ -211,13 +213,18 @@ function makeProjectSubGroup(
   });
 }
 
-function makeRoutePrefixItem(prefix: string, routes: Route[], parentItem?: ExpressMapItem): ExpressMapItem {
+function makeRoutePrefixItem(
+  prefix: string,
+  routes: Route[],
+  parentItem?: ExpressMapItem,
+  icon = 'list-tree',
+): ExpressMapItem {
   return new ExpressMapItem({
     label: prefix,
     kind: 'routePrefix',
     collapsibleState: vscode.TreeItemCollapsibleState.Collapsed,
     description: `${routes.length} routes`,
-    iconPath: new vscode.ThemeIcon('list-tree'),
+    iconPath: new vscode.ThemeIcon(icon),
     routePrefixData: routes,
     parentItem,
   });
@@ -405,7 +412,11 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
 
   private data: ExpressApp | null = null;
   private noAppFound = false;
+  private grouping: Grouping;
 
+  constructor(grouping: Grouping = 'prefix') {
+    this.grouping = grouping;
+  }
   // ── Item caches (populated in refresh(); required for treeView.reveal()) ───
   /** Stable Routes group item — same object instance returned by getRootChildren(). */
   private cachedRoutesGroup: ExpressMapItem | null = null;
@@ -445,13 +456,13 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
             'Routes', projectRoutes.length, 'list-unordered', projectRoot, projectItem, false,
           );
           this.cachedProjectRoutesGroups.set(projectRoot, routesSubGroup);
-          const prefixItems = this.buildPrefixChildren(projectRoutes, routesSubGroup);
+          const prefixItems = this.buildGroupedChildren(projectRoutes, routesSubGroup);
           this.cachedProjectPrefixItems.set(projectRoot, prefixItems);
         }
       } else {
         // Single-project: flat structure unchanged
         this.cachedRoutesGroup = makeGroup('Routes', 'group', data.routes.length, 'list-unordered');
-        this.routesTopLevel = this.buildPrefixChildren(data.routes, this.cachedRoutesGroup);
+        this.routesTopLevel = this.buildGroupedChildren(data.routes, this.cachedRoutesGroup);
       }
     }
     this._onDidChangeTreeData.fire();
@@ -472,6 +483,14 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
   /** Returns the cached tree item for a route (used by extension.ts for reveal). */
   getRouteItem(route: Route): ExpressMapItem | undefined {
     return this.cachedRouteItems.get(`${route.file}:${route.line}`);
+  }
+
+  getGrouping(): Grouping { return this.grouping; }
+
+  setGrouping(mode: Grouping): void {
+    if (this.grouping === mode) { return; }
+    this.grouping = mode;
+    if (this.data) { this.refresh(this.data); }
   }
 
   // ── TreeDataProvider implementation ────────────────────────────────────────
@@ -621,11 +640,11 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
             if (cached) { return cached; }
             const projectRoutes = routes.filter(r => r.projectRoot === projectRoot);
             if (projectRoutes.length === 0) { return [makeEmptyItem('No routes detected')]; }
-            return this.buildPrefixChildren(projectRoutes, element);
+            return this.buildGroupedChildren(projectRoutes, element);
           }
           if (routes.length === 0) { return [makeEmptyItem('No routes detected')]; }
           if (this.routesTopLevel.length === 0) {
-            this.routesTopLevel = this.buildPrefixChildren(routes, element);
+            this.routesTopLevel = this.buildGroupedChildren(routes, element);
           }
           return this.routesTopLevel;
 
@@ -755,5 +774,73 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
     }
 
     return [];
+  }
+
+  // ── grouping builders ──────────────────────────────────────────────────────
+
+  /** Dispatches to the correct builder based on the current grouping mode. */
+  private buildGroupedChildren(routes: Route[], parentItem: ExpressMapItem): ExpressMapItem[] {
+    switch (this.grouping) {
+      case 'file':   return this.buildFileChildren(routes, parentItem);
+      case 'method': return this.buildMethodChildren(routes, parentItem);
+      default:       return this.buildPrefixChildren(routes, parentItem);
+    }
+  }
+
+  /** Groups routes by source file. Files with 2+ routes get a collapsed folder node. */
+  private buildFileChildren(routes: Route[], parentItem: ExpressMapItem): ExpressMapItem[] {
+    const fileRoutes = new Map<string, Route[]>();
+    const fileOrder: string[] = [];
+    for (const route of routes) {
+      if (!fileRoutes.has(route.file)) { fileOrder.push(route.file); fileRoutes.set(route.file, []); }
+      fileRoutes.get(route.file)!.push(route);
+    }
+    const items: ExpressMapItem[] = [];
+    for (const file of fileOrder) {
+      const group = fileRoutes.get(file)!;
+      if (group.length >= 2) {
+        const folderItem = makeRoutePrefixItem(shortPath(file), group, parentItem, 'file-code');
+        for (const r of group) {
+          this.cachedRouteItems.set(`${r.file}:${r.line}`, makeRouteItem(r, folderItem));
+        }
+        items.push(folderItem);
+      } else {
+        const routeItem = makeRouteItem(group[0], parentItem);
+        this.cachedRouteItems.set(`${group[0].file}:${group[0].line}`, routeItem);
+        items.push(routeItem);
+      }
+    }
+    return items;
+  }
+
+  /** Groups routes by HTTP method. Methods with 2+ routes get a collapsed folder node. */
+  private buildMethodChildren(routes: Route[], parentItem: ExpressMapItem): ExpressMapItem[] {
+    const methodRoutes = new Map<string, Route[]>();
+    for (const route of routes) {
+      if (!methodRoutes.has(route.method)) { methodRoutes.set(route.method, []); }
+      methodRoutes.get(route.method)!.push(route);
+    }
+    const METHOD_ORDER = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'ALL'];
+    const entries = [...methodRoutes.entries()].sort((a, b) => {
+      const ai = METHOD_ORDER.indexOf(a[0]);
+      const bi = METHOD_ORDER.indexOf(b[0]);
+      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+    });
+    const items: ExpressMapItem[] = [];
+    for (const [method, group] of entries) {
+      if (group.length >= 2) {
+        const icon = METHOD_ICONS[method] ?? 'symbol-method';
+        const folderItem = makeRoutePrefixItem(method, group, parentItem, icon);
+        for (const r of group) {
+          this.cachedRouteItems.set(`${r.file}:${r.line}`, makeRouteItem(r, folderItem));
+        }
+        items.push(folderItem);
+      } else {
+        const routeItem = makeRouteItem(group[0], parentItem);
+        this.cachedRouteItems.set(`${group[0].file}:${group[0].line}`, routeItem);
+        items.push(routeItem);
+      }
+    }
+    return items;
   }
 }

@@ -3,6 +3,16 @@
 All notable changes to Express Map are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.5] — 2026-05-15
+
+### Added
+- **Configurable route grouping**: a `$(list-filter)` button in the Express Map panel header opens a Quick Pick to switch between three grouping modes:
+  - **By Prefix** *(default)* — groups routes by their first path segment, identical to the previous behaviour
+  - **By File** — groups routes by the source file they are defined in
+  - **By Method** — groups routes by HTTP method (GET, POST, PUT, PATCH, DELETE, …)
+
+  The selected mode is persisted across sessions.
+
 ## [1.0.4] — 2026-05-15
 
 ### Changed
