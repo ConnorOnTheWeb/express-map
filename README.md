@@ -41,6 +41,28 @@ Template files that are never referenced by any `res.render()` call appear under
 ### Duplicate Routes
 Multiple handlers registered for the same `METHOD /path` combination are grouped under **Duplicate Routes**.
 
+### Multi-Project / Monorepo Support
+Express Map works whether you open a single Express project, a multi-root VS Code workspace, or a parent directory containing several Express apps. All Express projects found are analysed and their routes appear in the tree separated into per-project folder nodes:
+
+```
+Routes (286)
+  ▶ my-api           (142 routes)
+    ▶ /users          (8 routes)
+  ▶ admin-service    (144 routes)
+    ▶ /dashboard      (6 routes)
+```
+
+Single-project windows show the existing flat prefix-grouped tree unchanged.
+
+### Route Search
+Press **Cmd+Shift+F** (macOS) / **Ctrl+Shift+F** (Windows/Linux) with the Express Map panel focused, or click the **$(search) search icon** in the panel header, to open a fuzzy Quick Pick over all routes. You can search by:
+- HTTP method (`GET`, `POST`, …)
+- Route path (`/admin/users`)
+- Source file path (`routes/users.js`)
+- Rendered template name (`admin/users`)
+
+Selecting a result opens the source file at the route definition and reveals it in the tree.
+
 ### Copilot Integration
 Express Map registers a **Copilot language model tool** that gives the AI a structured understanding of your entire Express app — routes, templates, broken refs, async issues, duplicates, and orphans — without you having to describe any of it manually.
 
@@ -73,7 +95,7 @@ EJS, Pug/Jade, Handlebars/HBS, Mustache, Nunjucks, Twig, Liquid, Eta. Unknown en
 ## Requirements
 
 - VS Code 1.118 or later
-- An Express.js project with a `package.json` in the workspace root
+- An Express.js project with a `package.json` in the workspace root (or any immediate sub-directory for multi-project windows)
 - Entry point discovered via `package.json` `"main"` field, or one of: `app.js`, `server.js`, `index.js`
 - **Express 4 or 5** — both fully supported
 

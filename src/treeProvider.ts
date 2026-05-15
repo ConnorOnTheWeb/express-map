@@ -554,13 +554,11 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
     if (brokenRefs.length > 0) {
       groups.push(makeGroup('Broken References', 'group', brokenRefs.length, 'error', true));
     }
-    // Async issues are only meaningful in Express 4 without an async-error patch.
-    // Express 5+ and express-async-errors both catch rejections automatically.
-    if (!this.data.asyncErrorsSafe) {
-      const asyncIssues = routes.filter(r => r.isAsync && !r.hasTryCatch);
-      if (asyncIssues.length > 0) {
-        groups.push(makeGroup('Potential Issues', 'group', asyncIssues.length, 'warning', true));
-      }
+    // Async issues are only meaningful per-route (asyncErrorsSafe is stamped per-project
+    // by the analyser, so Express 5 routes are excluded even in mixed workspaces).
+    const asyncIssues = routes.filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe);
+    if (asyncIssues.length > 0) {
+      groups.push(makeGroup('Potential Issues', 'group', asyncIssues.length, 'warning', true));
     }
 
     return groups;
@@ -605,8 +603,7 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
           return brokenRefs.map(makeBrokenRefItem);
 
         case 'Potential Issues': {
-          if (this.data?.asyncErrorsSafe) { return [makeEmptyItem('Async errors handled by framework')]; }
-          const issues = routes.filter(r => r.isAsync && !r.hasTryCatch);
+          const issues = routes.filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe);
           if (issues.length === 0) { return [makeEmptyItem('No issues found')]; }
           return issues.map(makeIssueRouteItem);
         }
@@ -643,7 +640,10 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
       if (route.templateName) {
         // Strip any template file extension that may appear in the render arg
         const tplName = (route.templateName ?? '').replace(/\.[a-z]+$/, '');
-        const tpl = templates.find(t => t.name === tplName);
+        // Prefer the template from the same project as the route to avoid
+        // cross-project collisions when multiple projects share a template name.
+        const tpl = templates.find(t => t.name === tplName && t.projectRoot === route.projectRoot)
+          ?? templates.find(t => t.name === tplName);
         const fileUri = tpl ? vscode.Uri.file(tpl.file) : undefined;
         children.push(makeRouteTemplateItem(route.templateName, fileUri));
       }

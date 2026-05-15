@@ -45,6 +45,12 @@ export interface Route {
   middleware: MiddlewareEntry[];
   /** Absolute path of the Express project root this route belongs to (set by analyzeWorkspace). */
   projectRoot?: string;
+  /**
+   * True when async errors are automatically caught for this route's project
+   * (Express 5+, or express-async-errors / express-async-handler present).
+   * Checked per-route so multi-project workspaces don't produce false positives.
+   */
+  asyncErrorsSafe?: boolean;
 }
 
 export interface MiddlewareEntry {
@@ -58,6 +64,8 @@ export interface Template {
   name: string;
   file: string;
   usedByRoutes: RouteRef[];
+  /** Absolute path of the Express project root this template belongs to. */
+  projectRoot?: string;
 }
 
 export interface RouteRef {

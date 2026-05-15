@@ -7,11 +7,17 @@ import type { ExpressApp, Route, Template } from './types';
 
 const TREE_VIEW_ID = 'expressMapTree';
 const REFRESH_COMMAND = 'expressMap.refresh';
+const SEARCH_COMMAND = 'expressMap.searchRoutes';
 const STATUS_BAR_ID = 'expressMap.status';
 const FIRST_ACTIVATION_KEY = 'expressMap.firstActivationDone';
 const DEBOUNCE_MS = 500;
 const REVEAL_DEBOUNCE_MS = 600;
 const LM_TOOL_NAME = 'express-map_analyzeApp';
+
+const ROUTE_METHOD_ICONS: Record<string, string> = {
+  GET: 'arrow-down', POST: 'arrow-up', PUT: 'edit', PATCH: 'diff-modified',
+  DELETE: 'trash', HEAD: 'eye', OPTIONS: 'settings', ALL: 'globe',
+};
 
 // ─── diagnostics helper ───────────────────────────────────────────────────────
 
@@ -41,21 +47,20 @@ function updateDiagnostics(
   }
 
   // Async handlers without try/catch — warning severity
-  // Only emitted when Express 4 is in use without an async-error patch package.
-  // Express 5+ and express-async-errors catch rejections automatically.
-  if (!result.asyncErrorsSafe) {
-    for (const route of result.routes) {
-      if (route.isAsync && !route.hasTryCatch) {
-        const diag = new vscode.Diagnostic(
-          new vscode.Range(route.line - 1, 0, route.line - 1, Number.MAX_SAFE_INTEGER),
-          `Express Map: async route ${route.method} ${route.resolvedPath} has no try/catch — ` +
-            `unhandled rejections hang the request and crash the server (Express 4 / Node 15+)`,
-          vscode.DiagnosticSeverity.Warning,
-        );
-        diag.source = 'Express Map';
-        diag.code = 'async-no-error-handling';
-        push(route.file, diag);
-      }
+  // Uses the per-route asyncErrorsSafe flag so multi-project workspaces don't
+  // produce false positives: Express 5 routes are never warned even when a
+  // sibling project uses Express 4 without an async-error patch.
+  for (const route of result.routes) {
+    if (route.isAsync && !route.hasTryCatch && !route.asyncErrorsSafe) {
+      const diag = new vscode.Diagnostic(
+        new vscode.Range(route.line - 1, 0, route.line - 1, Number.MAX_SAFE_INTEGER),
+        `Express Map: async route ${route.method} ${route.resolvedPath} has no try/catch — ` +
+          `unhandled rejections hang the request and crash the server (Express 4 / Node 15+)`,
+        vscode.DiagnosticSeverity.Warning,
+      );
+      diag.source = 'Express Map';
+      diag.code = 'async-no-error-handling';
+      push(route.file, diag);
     }
   }
 
@@ -100,7 +105,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // DocumentLinkProvider, CodeLensProvider, and auto-reveal all hot-path these.
   let lastRoutesByFile = new Map<string, Route[]>();
   let lastRouteFilePaths = new Set<string>();
-  let lastTemplatesByName = new Map<string, Template>();
+  // Multi-value map: template names are not unique across projects, so each
+  // name maps to all templates with that name (one per project at most).
+  let lastTemplatesByName = new Map<string, Template[]>();
 
   async function runAnalysis(): Promise<void> {
     const folders = vscode.workspace.workspaceFolders;
@@ -115,12 +122,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Collect Express project roots from every workspace folder (Option 2) and
     // their immediate sub-directories (Option 3) so that both multi-root
     // workspaces and parent-directory windows work out of the box.
-    const expressRoots: string[] = [];
+    // Use a Set for O(1) deduplication instead of O(n) Array.includes.
+    const expressRootsSet = new Set<string>();
     for (const folder of folders) {
       for (const root of findExpressRoots(folder.uri.fsPath)) {
-        if (!expressRoots.includes(root)) { expressRoots.push(root); }
+        expressRootsSet.add(root);
       }
     }
+    const expressRoots = [...expressRootsSet];
 
     if (expressRoots.length === 0) {
       provider.setNoAppFound();
@@ -165,7 +174,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if (list) { list.push(r); } else { lastRoutesByFile.set(r.file, [r]); }
     }
     lastRouteFilePaths = new Set(result.routes.map(r => r.file));
-    lastTemplatesByName = new Map(result.templates.map(t => [t.name, t]));
+    lastTemplatesByName = new Map<string, Template[]>();
+    for (const t of result.templates) {
+      const list = lastTemplatesByName.get(t.name);
+      if (list) { list.push(t); } else { lastTemplatesByName.set(t.name, [t]); }
+    }
 
     updateDiagnostics(diagnosticCollection, result);
 
@@ -250,8 +263,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           let match: RegExpExecArray | null;
           while ((match = re.exec(text)) !== null) {
             const tplName = match[2].replace(/\.[a-z]+$/, '');  // normalise: strip any extension
-            const tpl = lastTemplatesByName.get(tplName);
-            if (!tpl) { continue; }
+            const candidates = lastTemplatesByName.get(tplName);
+            if (!candidates || candidates.length === 0) { continue; }
+            // When multiple projects share a template name, prefer the one
+            // that lives under the same project root as the open document.
+            const docFsPath = document.uri.fsPath;
+            const tpl = candidates.find(c => c.projectRoot &&
+              (docFsPath.startsWith(c.projectRoot + '/') || docFsPath.startsWith(c.projectRoot + '\\')))
+              ?? candidates[0];
             // Offset of first char of template name (right after the opening quote).
             // match[0] ends with: <quote><name><quote> so name starts at
             // match.index + match[0].length - match[2].length - 1
@@ -282,7 +301,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }, () => { /* clipboard unavailable */ });
     }),
   );
-
+  // ── Search routes command (Quick Pick) ──────────────────────────────────
+  context.subscriptions.push(
+    vscode.commands.registerCommand(SEARCH_COMMAND, async () => {
+      if (!lastResult || lastResult.routes.length === 0) {
+        vscode.window.showInformationMessage('Express Map: no routes found yet.');
+        return;
+      }
+      const items = lastResult.routes.map(r => ({
+        label: `$(${ROUTE_METHOD_ICONS[r.method] ?? 'symbol-method'})\u00a0 ${r.method}  ${r.resolvedPath}`,
+        description: vscode.workspace.asRelativePath(r.file),
+        detail: r.templateName ? `renders ${r.templateName}` : undefined,
+        route: r,
+      }));
+      const picked = await vscode.window.showQuickPick(items, {
+        matchOnDescription: true,
+        matchOnDetail: true,
+        placeHolder: `Search ${lastResult.routes.length} routes…`,
+      });
+      if (!picked) { return; }
+      // Open the source file at the route definition line
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(picked.route.file));
+      const editor = await vscode.window.showTextDocument(doc);
+      const pos = new vscode.Position(Math.max(0, picked.route.line - 1), 0);
+      editor.selection = new vscode.Selection(pos, pos);
+      editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+      // Also reveal in the tree if it’s visible
+      const routeItem = provider.getRouteItem(picked.route);
+      if (routeItem) {
+        treeView.reveal(routeItem, { select: true, focus: false, expand: true })
+          .then(undefined, () => { /* tree not visible — ignore */ });
+      }
+    }),
+  );
   // ── Internal: reveal a route in the tree (used by CodeLens click) ───────────
   context.subscriptions.push(
     vscode.commands.registerCommand(
@@ -382,7 +433,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             routes: lastResult.routes.length,
             templates: lastResult.templates.length,
             brokenTemplateRefs: lastResult.brokenRefs.length,
-            asyncWithoutTryCatch: lastResult.routes.filter(r => r.isAsync && !r.hasTryCatch).length,
+            asyncWithoutTryCatch: lastResult.routes.filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe).length,
             duplicateRoutes: lastResult.duplicateRoutes.length,
             orphanedTemplates: lastResult.orphanedTemplates.length,
             viewEngine: lastResult.viewEngine || 'unknown',
@@ -409,7 +460,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             line: b.line,
           })),
           asyncWithoutTryCatch: lastResult.routes
-            .filter(r => r.isAsync && !r.hasTryCatch)
+            .filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe)
             .map(r => ({ method: r.method, path: r.resolvedPath, file: relativePath(r.file), line: r.line })),
           duplicateRoutes: lastResult.duplicateRoutes.map(group =>
             group.map(r => ({ method: r.method, path: r.resolvedPath, file: relativePath(r.file), line: r.line }))

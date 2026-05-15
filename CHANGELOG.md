@@ -3,6 +3,21 @@
 All notable changes to Express Map are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.3] — 2026-05-15
+
+### Added
+- **Route search** (`expressMap.searchRoutes`): fuzzy Quick Pick over all routes — searchable by HTTP method, path, file path, and rendered template name. Accessible via the search icon in the Express Map panel header, the Command Palette (*Express Map: Search Routes*), or **Cmd+Shift+F** / **Ctrl+Shift+F** when the Express Map panel is focused. Selecting a result opens the source file at the route's definition line and reveals it in the tree.
+
+## [1.0.2] — 2026-05-15
+
+### Added
+- **Multi-project tree grouping**: when a workspace contains multiple Express projects (parent-directory or multi-root window), routes are now separated into per-project folder nodes in the tree rather than merged into one flat list. Each folder is labelled with the project directory name and shows its route count.
+
+## [1.0.1] — 2026-05-15
+
+### Added
+- **Multi-project / monorepo support**: the extension now works when VS Code is opened on a parent directory containing multiple Express apps, or when a multi-root workspace includes several Express projects. All `workspaceFolders` are scanned; for each one, if the folder itself is not an Express project its immediate sub-directories are checked. All discovered Express roots are analysed and merged into a single tree.
+
 ## [1.0.0] — 2026-05-10
 
 ### Added

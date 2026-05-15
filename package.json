@@ -2,7 +2,7 @@
   "name": "express-map",
   "displayName": "Express Map",
   "description": "Visual route, middleware, and template navigation for Express apps",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "connorontheweb",
   "license": "MIT",
   "icon": "media/express-map.png",
@@ -72,6 +72,12 @@
         "category": "Express Map"
       },
       {
+        "command": "expressMap.searchRoutes",
+        "title": "Search Routes",
+        "icon": "$(search)",
+        "category": "Express Map"
+      },
+      {
         "command": "expressMap.copyRoutePath",
         "title": "Copy Route Path",
         "icon": "$(copy)",
@@ -81,9 +87,14 @@
     "menus": {
       "view/title": [
         {
+          "command": "expressMap.searchRoutes",
+          "when": "view == expressMapTree",
+          "group": "navigation@1"
+        },
+        {
           "command": "expressMap.refresh",
           "when": "view == expressMapTree",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -109,6 +120,14 @@
       }
     ]
   },
+  "keybindings": [
+    {
+      "command": "expressMap.searchRoutes",
+      "key": "ctrl+shift+f",
+      "mac": "cmd+shift+f",
+      "when": "focusedView == expressMapTree"
+    }
+  ],
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",

@@ -919,9 +919,16 @@ export async function analyzeWorkspace(workspaceRoot: string): Promise<ExpressAp
     return empty;
   }
 
-  // Tag every route with its project root so the tree provider can group by project
-  // in multi-project windows.
-  for (const r of state.routes) { r.projectRoot = workspaceRoot; }
+  // Detect express version/async safety early so it can be stamped onto every route.
+  // Per-route flags prevent false-positive warnings in multi-project workspaces where
+  // one project uses Express 5 and another uses Express 4 without an async-error patch.
+  const { expressVersion, asyncErrorsSafe } = detectExpressSetup(workspaceRoot);
+
+  // Tag every route with its project root and async-safety flag.
+  for (const r of state.routes) {
+    r.projectRoot = workspaceRoot;
+    r.asyncErrorsSafe = asyncErrorsSafe;
+  }
 
   // Resolve views directory and template engine
   const viewsDir = state.viewsDir ?? path.join(state.entryDir, 'views');
@@ -989,49 +996,49 @@ export async function analyzeWorkspace(workspaceRoot: string): Promise<ExpressAp
     }
   }
 
-  // Build templates list with back-references to routes
+  // Precompute inverted index: normalised render ref → routes that use it.
+  // Reduces template→route matching from O(T × R × E) to O(R + T).
+  const routesByTemplateRef = new Map<string, Route[]>();
+  for (const r of state.routes) {
+    for (const raw of [r.templateName, ...r.extraTemplateRefs]) {
+      if (!raw) { continue; }
+      const ref = raw.replace(/\.[a-z]+$/, '').replace(/^\//, '');
+      const list = routesByTemplateRef.get(ref);
+      if (list) { list.push(r); } else { routesByTemplateRef.set(ref, [r]); }
+    }
+  }
+
+  // Build templates list with back-references to routes.
   const templates: Template[] = templateFiles.map(file => {
     const ext = path.extname(file);
     const relName = path.relative(viewsDir, file).slice(0, -ext.length).replace(/\\/g, '/');
-    const baseName = path.basename(file, ext);
-    const usedByRoutes: RouteRef[] = state.routes
-      .filter(r => {
-        // Check every template name associated with this route (primary + fallback/error renders).
-        const allRefs = [r.templateName, ...r.extraTemplateRefs]
-          .filter((s): s is string => s !== undefined)
-          .map(s => s.replace(/\.[a-z]+$/, '').replace(/^\//, ''));
-        if (allRefs.includes(relName)) { return true; }
-        // Only match by baseName for root-level templates (no subdirectory).
-        if (!relName.includes('/') && allRefs.some(t => t === baseName)) { return true; }
-        return false;
-      })
+    // O(1) lookup via inverted index. For root-level templates relName === baseName, so
+    // the original baseName fallback was always redundant — relName lookup suffices.
+    const usedByRoutes: RouteRef[] = (routesByTemplateRef.get(relName) ?? [])
       .map(r => ({ label: `${r.method} ${r.resolvedPath}`, file: r.file, line: r.line }));
-    return { name: relName, file, usedByRoutes };
+    return { name: relName, file, usedByRoutes, projectRoot: workspaceRoot };
   });
 
-  // Orphaned templates: template files never referenced by res.render()
-  const orphanedTemplates: OrphanedTemplate[] = templateFiles
-    .filter(file => {
-      const ext = path.extname(file);
-      const relName = path.relative(viewsDir, file).slice(0, -ext.length).replace(/\\/g, '/');
-      const baseName = path.basename(file, ext);
-      const segments = relName.split('/');
+  // Orphaned templates: template files never referenced by res.render().
+  // Derived from the already-computed templates array so templateFiles is not
+  // iterated a second time with duplicate relName/baseName computation.
+  const orphanedTemplates: OrphanedTemplate[] = templates
+    .filter(t => {
+      const segments = t.name.split('/');
       // Includes/layouts/partials are never directly rendered — skip by convention
       if (segments[0] === 'partials' || segments[0] === 'layouts' || segments[0] === 'includes') { return false; }
-      if (segments[segments.length - 1].startsWith('_')) { return false; }
-      if (state.templateRefs.has(relName)) { return false; }
-      // Only use baseName matching for root-level templates
-      if (!relName.includes('/') && state.templateRefs.has(baseName)) { return false; }
+      const lastName = segments[segments.length - 1];
+      if (lastName.startsWith('_')) { return false; }
+      if (state.templateRefs.has(t.name)) { return false; }
+      // Only use last-segment matching for root-level templates
+      if (!t.name.includes('/') && state.templateRefs.has(lastName)) { return false; }
       // Check prefix-based references (e.g. res.render(`social/${platform}`))
       for (const prefix of state.templateRefPrefixes) {
-        if (relName.startsWith(prefix) || baseName.startsWith(prefix)) { return false; }
+        if (t.name.startsWith(prefix) || lastName.startsWith(prefix)) { return false; }
       }
       return true;
     })
-    .map(file => ({
-      name: path.relative(viewsDir, file).slice(0, -path.extname(file).length).replace(/\\/g, '/'),
-      file,
-    }));
+    .map(t => ({ name: t.name, file: t.file }));
 
   // Duplicate routes: same HTTP method + resolved path
   const routeGroups = new Map<string, Route[]>();
@@ -1060,8 +1067,6 @@ export async function analyzeWorkspace(workspaceRoot: string): Promise<ExpressAp
       file: r.file,
       line: r.line,
     }));
-
-  const { expressVersion, asyncErrorsSafe } = detectExpressSetup(workspaceRoot);
 
   return {
     routes: state.routes,
