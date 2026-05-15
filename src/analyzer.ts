@@ -919,6 +919,10 @@ export async function analyzeWorkspace(workspaceRoot: string): Promise<ExpressAp
     return empty;
   }
 
+  // Tag every route with its project root so the tree provider can group by project
+  // in multi-project windows.
+  for (const r of state.routes) { r.projectRoot = workspaceRoot; }
+
   // Resolve views directory and template engine
   const viewsDir = state.viewsDir ?? path.join(state.entryDir, 'views');
   const templateExts = resolveTemplateExtensions(viewsDir, state.viewEngine);

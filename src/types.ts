@@ -43,6 +43,8 @@ export interface Route {
   /** Additional render templates found in the same handler (fallback/error paths). */
   extraTemplateRefs: string[];
   middleware: MiddlewareEntry[];
+  /** Absolute path of the Express project root this route belongs to (set by analyzeWorkspace). */
+  projectRoot?: string;
 }
 
 export interface MiddlewareEntry {
