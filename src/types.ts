@@ -4,6 +4,8 @@ export interface BrokenRef {
   templateName: string;   // the string passed to res.render()
   file: string;
   line: number;
+  /** Absolute path of the Express project root this broken ref belongs to. */
+  projectRoot?: string;
 }
 
 export interface ExpressApp {
@@ -27,6 +29,8 @@ export interface ExpressApp {
 export interface OrphanedTemplate {
   name: string;  // relative path without extension
   file: string;  // absolute path to template file
+  /** Absolute path of the Express project root this template belongs to. */
+  projectRoot?: string;
 }
 
 export interface Route {
@@ -58,6 +62,8 @@ export interface MiddlewareEntry {
   file: string;
   line: number;
   scope: 'global' | 'router' | 'route';
+  /** Absolute path of the Express project root this middleware belongs to. */
+  projectRoot?: string;
 }
 
 export interface Template {

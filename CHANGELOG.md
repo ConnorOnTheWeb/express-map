@@ -3,6 +3,11 @@
 All notable changes to Express Map are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.4] — 2026-05-15
+
+### Changed
+- **Project-first tree layout** (multi-project): in workspaces with multiple Express apps, each project is now the top-level item in the Express Map panel. Routes, Templates, Middleware, Orphaned Templates, Duplicate Routes, Broken References, and Potential Issues are all grouped **under** their respective project folder rather than as flat sections alongside Routes. Single-project workspaces are unchanged.
+
 ## [1.0.3] — 2026-05-15
 
 ### Added

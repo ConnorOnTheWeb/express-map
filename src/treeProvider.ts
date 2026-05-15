@@ -189,6 +189,28 @@ function makeProjectItem(name: string, routes: Route[], parentItem?: ExpressMapI
   });
 }
 
+/** Creates a group item scoped to a specific project (multi-project mode). */
+function makeProjectSubGroup(
+  label: string,
+  count: number,
+  icon: string,
+  projectRoot: string,
+  parentItem: ExpressMapItem,
+  collapsed = true,
+): ExpressMapItem {
+  return new ExpressMapItem({
+    label,
+    kind: 'group',
+    collapsibleState: collapsed
+      ? vscode.TreeItemCollapsibleState.Collapsed
+      : vscode.TreeItemCollapsibleState.Expanded,
+    description: `${count}`,
+    iconPath: new vscode.ThemeIcon(icon),
+    projectRoot,
+    parentItem,
+  });
+}
+
 function makeRoutePrefixItem(prefix: string, routes: Route[], parentItem?: ExpressMapItem): ExpressMapItem {
   return new ExpressMapItem({
     label: prefix,
@@ -387,12 +409,16 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
   // ── Item caches (populated in refresh(); required for treeView.reveal()) ───
   /** Stable Routes group item — same object instance returned by getRootChildren(). */
   private cachedRoutesGroup: ExpressMapItem | null = null;
-  /** Top-level items under Routes (project items in multi-project mode, prefix items otherwise). */
+  /** Top-level items under Routes in single-project mode. */
   private routesTopLevel: ExpressMapItem[] = [];
   /** All route items keyed by `${file}:${line}` for O(1) lookup by reveal. */
   private cachedRouteItems = new Map<string, ExpressMapItem>();
   /** Per-project prefix items keyed by projectRoot — used in multi-project mode. */
   private cachedProjectPrefixItems = new Map<string, ExpressMapItem[]>();
+  /** Per-project root items keyed by projectRoot — used as top-level items in multi-project mode. */
+  private cachedProjectItems = new Map<string, ExpressMapItem>();
+  /** Per-project Routes sub-group items — must be same object used as parentItem for prefix items. */
+  private cachedProjectRoutesGroups = new Map<string, ExpressMapItem>();
 
   // ── public API ─────────────────────────────────────────────────────────────
 
@@ -403,10 +429,30 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
     this.routesTopLevel = [];
     this.cachedRouteItems.clear();
     this.cachedProjectPrefixItems.clear();
+    this.cachedProjectItems.clear();
+    this.cachedProjectRoutesGroups.clear();
     // Eagerly build route item tree so getRouteItem() works before the user expands the tree
     if (data.routes.length > 0) {
-      this.cachedRoutesGroup = makeGroup('Routes', 'group', data.routes.length, 'list-unordered');
-      this.routesTopLevel = this.buildRoutesChildren(data.routes, this.cachedRoutesGroup);
+      const projectRoots = [...new Set(data.routes.map(r => r.projectRoot).filter((p): p is string => !!p))];
+      if (projectRoots.length > 1) {
+        // Multi-project: pre-build project items and per-project Routes sub-groups so that
+        // prefix/route items have the correct parentItem chain for treeView.reveal().
+        for (const projectRoot of projectRoots) {
+          const projectRoutes = data.routes.filter(r => r.projectRoot === projectRoot);
+          const projectItem = makeProjectItem(path.basename(projectRoot), projectRoutes);
+          this.cachedProjectItems.set(projectRoot, projectItem);
+          const routesSubGroup = makeProjectSubGroup(
+            'Routes', projectRoutes.length, 'list-unordered', projectRoot, projectItem, false,
+          );
+          this.cachedProjectRoutesGroups.set(projectRoot, routesSubGroup);
+          const prefixItems = this.buildPrefixChildren(projectRoutes, routesSubGroup);
+          this.cachedProjectPrefixItems.set(projectRoot, prefixItems);
+        }
+      } else {
+        // Single-project: flat structure unchanged
+        this.cachedRoutesGroup = makeGroup('Routes', 'group', data.routes.length, 'list-unordered');
+        this.routesTopLevel = this.buildPrefixChildren(data.routes, this.cachedRoutesGroup);
+      }
     }
     this._onDidChangeTreeData.fire();
   }
@@ -418,6 +464,8 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
     this.routesTopLevel = [];
     this.cachedRouteItems.clear();
     this.cachedProjectPrefixItems.clear();
+    this.cachedProjectItems.clear();
+    this.cachedProjectRoutesGroups.clear();
     this._onDidChangeTreeData.fire();
   }
 
@@ -499,27 +547,6 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
     return items;
   }
 
-  /**
-   * Builds the top-level children of the Routes group.
-   * In multi-project windows (multiple distinct projectRoots) inserts a
-   * per-project folder layer above the path-prefix grouping.
-   */
-  private buildRoutesChildren(routes: Route[], routesGroup: ExpressMapItem): ExpressMapItem[] {
-    const projectRoots = [...new Set(routes.map(r => r.projectRoot).filter((p): p is string => !!p))];
-    if (projectRoots.length > 1) {
-      const items: ExpressMapItem[] = [];
-      for (const projectRoot of projectRoots) {
-        const projectRoutes = routes.filter(r => r.projectRoot === projectRoot);
-        const projectItem = makeProjectItem(path.basename(projectRoot), projectRoutes, routesGroup);
-        const prefixItems = this.buildPrefixChildren(projectRoutes, projectItem);
-        this.cachedProjectPrefixItems.set(projectRoot, prefixItems);
-        items.push(projectItem);
-      }
-      return items;
-    }
-    return this.buildPrefixChildren(routes, routesGroup);
-  }
-
   // ── root children ──────────────────────────────────────────────────────────
 
   private getRootChildren(): ExpressMapItem[] {
@@ -532,6 +559,17 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
 
     const { routes, middleware, templates, orphanedTemplates, duplicateRoutes, brokenRefs } = this.data;
 
+    // Multi-project: project items at top level; all section groups are nested under each project.
+    const projectRoots = [...new Set(routes.map(r => r.projectRoot).filter((p): p is string => !!p))];
+    if (projectRoots.length > 1) {
+      if (this.cachedProjectItems.size > 0) {
+        return [...this.cachedProjectItems.values()];
+      }
+      // Fallback if refresh() hasn't populated caches yet
+      return projectRoots.map(pr => makeProjectItem(path.basename(pr), routes.filter(r => r.projectRoot === pr)));
+    }
+
+    // Single-project: flat groups (unchanged behaviour).
     // Use the pre-built Routes group item so its identity is consistent with
     // the parentItem stored on cached route items — required for treeView.reveal().
     const routesGroup = this.cachedRoutesGroup ?? makeGroup('Routes', 'group', routes.length, 'list-unordered');
@@ -571,39 +609,67 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
 
     const { routes, middleware, templates, orphanedTemplates, duplicateRoutes, brokenRefs } = this.data;
 
-    // Top-level groups — identified by label
+    // Groups — top-level (single-project) or per-project sub-groups (multi-project)
     if (element.kind === 'group') {
       const label = typeof element.label === 'string' ? element.label : element.label?.label ?? '';
+      const projectRoot = element.projectRoot; // set for per-project sub-groups, undefined for top-level
+
       switch (label) {
         case 'Routes':
+          if (projectRoot) {
+            const cached = this.cachedProjectPrefixItems.get(projectRoot);
+            if (cached) { return cached; }
+            const projectRoutes = routes.filter(r => r.projectRoot === projectRoot);
+            if (projectRoutes.length === 0) { return [makeEmptyItem('No routes detected')]; }
+            return this.buildPrefixChildren(projectRoutes, element);
+          }
           if (routes.length === 0) { return [makeEmptyItem('No routes detected')]; }
-          // Return pre-built items; lazily build if refresh didn't run yet
           if (this.routesTopLevel.length === 0) {
-            this.routesTopLevel = this.buildRoutesChildren(routes, element);
+            this.routesTopLevel = this.buildPrefixChildren(routes, element);
           }
           return this.routesTopLevel;
 
-        case 'Templates':
-          if (templates.length === 0) { return [makeEmptyItem('No templates found')]; }
-          return templates.map(makeTemplateItem);
-
-        case 'Middleware': {
-          const globalMw = middleware.filter(m => m.scope !== 'route');
-          if (globalMw.length === 0) { return [makeEmptyItem('No global or router middleware')]; }
-          return globalMw.map(makeMiddlewareItem);
+        case 'Templates': {
+          const filtered = projectRoot
+            ? templates.filter(t => t.projectRoot === projectRoot)
+            : templates;
+          if (filtered.length === 0) { return [makeEmptyItem('No templates found')]; }
+          return filtered.map(makeTemplateItem);
         }
 
-        case 'Orphaned Templates':
-          return orphanedTemplates.map(makeOrphanItem);
+        case 'Middleware': {
+          const filtered = (projectRoot
+            ? middleware.filter(m => m.projectRoot === projectRoot)
+            : middleware
+          ).filter(m => m.scope !== 'route');
+          if (filtered.length === 0) { return [makeEmptyItem('No global or router middleware')]; }
+          return filtered.map(makeMiddlewareItem);
+        }
 
-        case 'Duplicate Routes':
-          return duplicateRoutes.map(makeDuplicateGroupItem);
+        case 'Orphaned Templates': {
+          const filtered = projectRoot
+            ? orphanedTemplates.filter(o => o.projectRoot === projectRoot)
+            : orphanedTemplates;
+          return filtered.map(makeOrphanItem);
+        }
 
-        case 'Broken References':
-          return brokenRefs.map(makeBrokenRefItem);
+        case 'Duplicate Routes': {
+          const filtered = projectRoot
+            ? duplicateRoutes.filter(g => g[0]?.projectRoot === projectRoot)
+            : duplicateRoutes;
+          return filtered.map(makeDuplicateGroupItem);
+        }
+
+        case 'Broken References': {
+          const filtered = projectRoot
+            ? brokenRefs.filter(r => r.projectRoot === projectRoot)
+            : brokenRefs;
+          return filtered.map(makeBrokenRefItem);
+        }
 
         case 'Potential Issues': {
-          const issues = routes.filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe);
+          const scopedRoutes = projectRoot ? routes.filter(r => r.projectRoot === projectRoot) : routes;
+          const issues = scopedRoutes.filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe);
           if (issues.length === 0) { return [makeEmptyItem('No issues found')]; }
           return issues.map(makeIssueRouteItem);
         }
@@ -613,14 +679,42 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
       }
     }
 
-    // Project folder → path-prefix groups for that project
+    // Project folder → per-project section sub-groups
     if (element.kind === 'project') {
       const projectRoot = element.projectRoot;
       if (!projectRoot) { return []; }
-      const cached = this.cachedProjectPrefixItems.get(projectRoot);
-      if (cached) { return cached; }
-      // Fallback: rebuild (e.g. if tree was expanded before refresh ran)
-      return this.buildPrefixChildren(element.routePrefixData ?? [], element);
+
+      const projectRoutes = routes.filter(r => r.projectRoot === projectRoot);
+      const projectTemplates = templates.filter(t => t.projectRoot === projectRoot);
+      const projectMw = middleware.filter(m => m.projectRoot === projectRoot && m.scope !== 'route');
+      const projectOrphans = orphanedTemplates.filter(o => o.projectRoot === projectRoot);
+      const projectDuplicates = duplicateRoutes.filter(g => g[0]?.projectRoot === projectRoot);
+      const projectBrokenRefs = brokenRefs.filter(r => r.projectRoot === projectRoot);
+      const projectIssues = projectRoutes.filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe);
+
+      // The Routes sub-group MUST be the same cached object used as parentItem for
+      // prefix/route items in refresh() — required for getParent() reveal chain.
+      const routesSubGroup = this.cachedProjectRoutesGroups.get(projectRoot)
+        ?? makeProjectSubGroup('Routes', projectRoutes.length, 'list-unordered', projectRoot, element, false);
+
+      const groups: ExpressMapItem[] = [
+        routesSubGroup,
+        makeProjectSubGroup('Templates', projectTemplates.length, 'file-code', projectRoot, element),
+        makeProjectSubGroup('Middleware', projectMw.length, 'symbol-function', projectRoot, element),
+      ];
+      if (projectOrphans.length > 0) {
+        groups.push(makeProjectSubGroup('Orphaned Templates', projectOrphans.length, 'warning', projectRoot, element));
+      }
+      if (projectDuplicates.length > 0) {
+        groups.push(makeProjectSubGroup('Duplicate Routes', projectDuplicates.length, 'warning', projectRoot, element));
+      }
+      if (projectBrokenRefs.length > 0) {
+        groups.push(makeProjectSubGroup('Broken References', projectBrokenRefs.length, 'error', projectRoot, element));
+      }
+      if (projectIssues.length > 0) {
+        groups.push(makeProjectSubGroup('Potential Issues', projectIssues.length, 'warning', projectRoot, element));
+      }
+      return groups;
     }
 
     // Route prefix group → individual routes (return cached items built in refresh())

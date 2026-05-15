@@ -2,7 +2,7 @@
   "name": "express-map",
   "displayName": "Express Map",
   "description": "Visual route, middleware, and template navigation for Express apps",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "publisher": "connorontheweb",
   "license": "MIT",
   "icon": "media/express-map.png",

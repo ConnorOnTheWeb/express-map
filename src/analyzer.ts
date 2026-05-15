@@ -929,6 +929,10 @@ export async function analyzeWorkspace(workspaceRoot: string): Promise<ExpressAp
     r.projectRoot = workspaceRoot;
     r.asyncErrorsSafe = asyncErrorsSafe;
   }
+  // Tag every middleware entry with its project root.
+  for (const m of state.middleware) {
+    m.projectRoot = workspaceRoot;
+  }
 
   // Resolve views directory and template engine
   const viewsDir = state.viewsDir ?? path.join(state.entryDir, 'views');
@@ -1038,7 +1042,7 @@ export async function analyzeWorkspace(workspaceRoot: string): Promise<ExpressAp
       }
       return true;
     })
-    .map(t => ({ name: t.name, file: t.file }));
+    .map(t => ({ name: t.name, file: t.file, projectRoot: workspaceRoot }));
 
   // Duplicate routes: same HTTP method + resolved path
   const routeGroups = new Map<string, Route[]>();
@@ -1066,6 +1070,7 @@ export async function analyzeWorkspace(workspaceRoot: string): Promise<ExpressAp
       templateName: r.templateName!,
       file: r.file,
       line: r.line,
+      projectRoot: r.projectRoot,
     }));
 
   return {
