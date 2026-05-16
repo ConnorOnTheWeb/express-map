@@ -4,6 +4,8 @@
 
 Express Map statically analyses your Express application and renders an interactive tree of every route, middleware layer, and template file. No running server needed, no configuration required - just open your project and the map appears.
 
+[![VS Marketplace](https://vsmarketplacebadges.dev/version/connorontheweb.express-map.svg)](https://marketplace.visualstudio.com/items?itemName=connorontheweb.express-map) [![License](https://img.shields.io/github/license/connorontheweb/express-map)](https://github.com/connorontheweb/express-map/blob/main/LICENSE) [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+
 ---
 
 ## Features

@@ -3,6 +3,14 @@
 All notable changes to Express Map are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.6] — 2026-05-16
+
+### Changed
+
+- README: added VS Marketplace version, license, and TypeScript badges.
+
+---
+
 ## [1.0.5] — 2026-05-15
 
 ### Added
