@@ -6,6 +6,8 @@ Express Map statically analyses your Express application and renders an interact
 
 [![VS Marketplace](https://vsmarketplacebadges.dev/version/connorontheweb.express-map.svg)](https://marketplace.visualstudio.com/items?itemName=connorontheweb.express-map) [![License](https://img.shields.io/github/license/connorontheweb/express-map)](https://github.com/connorontheweb/express-map/blob/main/LICENSE) [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 
+[![Latest Release](https://img.shields.io/github/v/release/connorontheweb/express-map?label=download&logo=github)](https://github.com/connorontheweb/express-map/releases/latest)
+
 ---
 
 ## Features
@@ -14,7 +16,7 @@ Express Map statically analyses your Express application and renders an interact
 All routes are grouped by path prefix and displayed with their HTTP method, resolved path, source file, and middleware chain. Click any route to jump to its definition.
 
 ### Template Navigation
-`res.render('some/view')` calls become clickable links — hold **Cmd** (macOS) or **Ctrl** (Windows/Linux) and click the template name in your source file to open the template directly.
+`res.render('some/view')` calls become clickable links - hold **Cmd** (macOS) or **Ctrl** (Windows/Linux) and click the template name in your source file to open the template directly.
 
 ### CodeLens
 Route metadata appears inline above each handler function:
