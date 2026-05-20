@@ -3,6 +3,12 @@
 All notable changes to Express Map are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.7] — 2026-05-19
+
+### Changed
+
+- package.json engine version updated to support Open VSX and Cursor.
+
 ## [1.0.6] — 2026-05-16
 
 ### Changed
