@@ -3,6 +3,12 @@
 All notable changes to Express Map are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.8] - 2026-05-19
+
+### Changed
+
+- bump to keep changelog current
+
 ## [1.0.7] — 2026-05-19
 
 ### Changed
