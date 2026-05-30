@@ -28,7 +28,7 @@ GET /admin/users · 2 middleware · renders admin/users
 Click the CodeLens label to reveal that route in the Express Map panel.
 
 ### Auto-Reveal
-As you move the cursor through a route file, the corresponding route is highlighted in the tree automatically.
+As you move the cursor through a route file, the corresponding route is highlighted in the tree automatically — but only when the Express Map panel is already the active sidebar view. The sidebar will never switch away from the File Explorer (or any other panel) on its own. When you manually switch to Express Map, the tree immediately snaps to the route under the current cursor position.
 
 ### Broken Reference Detection
 Routes that call `res.render('some/view')` where `some/view` doesn't exist in the views directory are flagged:

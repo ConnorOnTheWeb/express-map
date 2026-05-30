@@ -3,6 +3,13 @@
 All notable changes to Express Map are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.9] — 2026-05-30
+
+### Fixed
+
+- **Auto-reveal no longer hijacks the sidebar.** Previously, moving the cursor inside a route file would call `treeView.reveal()` even when the Express Map panel was not visible, causing VS Code to switch the sidebar away from the File Explorer (or any other active panel). The auto-reveal handler now checks `treeView.visible` first and skips the reveal entirely when Express Map is not the active panel.
+- **Instant sync on panel open.** A new `treeView.onDidChangeVisibility` listener detects when the user manually switches to Express Map and immediately highlights the route under the current cursor — so the tree is always in the right place the moment the panel becomes visible.
+
 ## [1.0.8] - 2026-05-19
 
 ### Changed

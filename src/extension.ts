@@ -400,30 +400,54 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // ── Auto-reveal: highlight active route in tree as cursor moves ───────────
+  // Helper: reveal the route closest above the cursor in the given editor.
+  // Returns without doing anything if the tree is not currently visible —
+  // this prevents treeView.reveal() from stealing the sidebar away from the
+  // File Explorer (or any other panel) while the user is working there.
+  function revealActiveRoute(editor: vscode.TextEditor): void {
+    if (!lastResult) { return; }
+    if (!treeView.visible) { return; }
+    const filePath = editor.document.uri.fsPath;
+    if (!lastRouteFilePaths.has(filePath)) { return; }
+    const cursor = editor.selection.active.line + 1; // 1-based
+    const fileRoutes = lastRoutesByFile.get(filePath) ?? [];
+    let route: Route | undefined;
+    for (const r of fileRoutes) {
+      if (r.line <= cursor) { route = r; }
+    }
+    if (!route) { return; }
+    const routeItem = provider.getRouteItem(route);
+    if (!routeItem) { return; }
+    treeView.reveal(routeItem, { select: true, focus: false, expand: false })
+      .then(undefined, () => { /* tree not visible — ignore */ });
+  }
+
   let revealDebounce: ReturnType<typeof setTimeout> | undefined;
   context.subscriptions.push(
     vscode.window.onDidChangeTextEditorSelection(e => {
+      // Skip entirely when Express Map isn't the active sidebar panel so we
+      // never cause the sidebar to switch away from the File Explorer.
+      if (!treeView.visible) { return; }
       if (!lastResult) { return; }
       const filePath = e.textEditor.document.uri.fsPath;
       // Only trigger for files that contain known routes (skip everything else)
       if (!lastRouteFilePaths.has(filePath)) { return; }
       clearTimeout(revealDebounce);
       revealDebounce = setTimeout(() => {
-        if (!lastResult) { return; }
-        const cursor = e.textEditor.selection.active.line + 1; // convert to 1-based
-        // Find the route whose declaration is closest above (or at) the cursor.
-        // Routes within a file are in ascending source order — iterate without sort.
-        const fileRoutes = lastRoutesByFile.get(filePath) ?? [];
-        let route: Route | undefined;
-        for (const r of fileRoutes) {
-          if (r.line <= cursor) { route = r; }
-        }
-        if (!route) { return; }
-        const routeItem = provider.getRouteItem(route);
-        if (!routeItem) { return; }
-        treeView.reveal(routeItem, { select: true, focus: false, expand: false })
-          .then(undefined, () => { /* tree not visible — ignore */ });
+        revealActiveRoute(e.textEditor);
       }, REVEAL_DEBOUNCE_MS);
+    }),
+  );
+
+  // When the user manually switches the sidebar to Express Map, immediately
+  // sync the tree to wherever the cursor currently is — so the view is always
+  // in the right place the moment it becomes visible.
+  context.subscriptions.push(
+    treeView.onDidChangeVisibility(e => {
+      if (!e.visible) { return; }
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) { return; }
+      revealActiveRoute(editor);
     }),
   );
 
