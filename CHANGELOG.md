@@ -3,6 +3,12 @@
 All notable changes to Express Map are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.10] — 2026-05-31
+
+### Fixed
+
+- **Clicking middleware / template / orphan items no longer hijacks the route selection.** Previously, clicking any non-route tree item (anonymous middleware, named middleware, template, orphan, etc.) would open the correct file at the correct line, but then the auto-reveal debounce would fire and overwrite the tree selection with the nearest route above that line — making it appear as though clicking middleware jumped to a random unrelated route. The fix: `onDidChangeTextEditorSelection` now exits immediately when `e.kind === TextEditorSelectionChangeKind.Command`, which is the kind VS Code assigns when a selection is placed programmatically (via `vscode.open`). Genuine user navigation (keyboard and mouse) still triggers auto-reveal normally.
+
 ## [1.0.9] — 2026-05-30
 
 ### Fixed

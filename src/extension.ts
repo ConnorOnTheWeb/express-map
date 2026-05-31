@@ -429,6 +429,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // never cause the sidebar to switch away from the File Explorer.
       if (!treeView.visible) { return; }
       if (!lastResult) { return; }
+      // Only react to genuine user navigation (keyboard / mouse).
+      // Command-kind fires when a file is opened programmatically — e.g. when
+      // the user clicks a middleware, template, or orphan tree item. Without
+      // this guard the auto-reveal would immediately overwrite the tree
+      // selection with the nearest *route* above that line, making it appear
+      // as though clicking non-route items jumps to a random route.
+      if (e.kind === vscode.TextEditorSelectionChangeKind.Command) { return; }
       const filePath = e.textEditor.document.uri.fsPath;
       // Only trigger for files that contain known routes (skip everything else)
       if (!lastRouteFilePaths.has(filePath)) { return; }
