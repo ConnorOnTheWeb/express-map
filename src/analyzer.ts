@@ -206,7 +206,7 @@ function inferCatchAllName(node: Node): string {
         }
       }
       for (const key of Object.keys(n)) {
-        const child = (n as Record<string, unknown>)[key];
+        const child = (n as unknown as Record<string, unknown>)[key];
         if (Array.isArray(child)) {
           for (const item of child) {
             if (item && typeof item === 'object' && 'type' in item) { scan(item as Node); }
