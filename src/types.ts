@@ -62,6 +62,12 @@ export interface MiddlewareEntry {
   file: string;
   line: number;
   scope: 'global' | 'router' | 'route';
+  /**
+   * When true this entry is a terminal catch-all handler (404 handler, error handler)
+   * rather than a pipeline middleware layer. Classified separately in the tree under
+   * "Catch-all Handlers".
+   */
+  isCatchAll?: boolean;
   /** Absolute path of the Express project root this middleware belongs to. */
   projectRoot?: string;
 }

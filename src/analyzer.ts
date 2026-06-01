@@ -172,6 +172,60 @@ function getFunctionName(node: Node): string | undefined {
   return undefined;
 }
 
+/**
+ * Returns a descriptive name for anonymous catch-all handlers registered via
+ * app.use() with no path (or '/').
+ *   - 4-param signature (err, req, res, next) → 'error handler'
+ *   - Inline call to res.status(404) or res.sendStatus(404) → '404 handler'
+ *   - Inline call to res.status(5xx) or res.sendStatus(5xx) → '5xx handler'
+ *   - Otherwise → 'catch-all handler'
+ */
+function inferCatchAllName(node: Node): string {
+  const params: Array<Node | PatternLike | RestElement> =
+    (node as { params?: Array<Node | PatternLike | RestElement> }).params ?? [];
+  if (params.length === 4) { return 'error handler'; }
+
+  // Scan the function body for a numeric status code passed to res.status() / res.sendStatus()
+  const body = (node as { body?: Node }).body;
+  if (body) {
+    let statusCode: number | undefined;
+    const scan = (n: Node | null | undefined): void => {
+      if (!n || typeof n !== 'object') { return; }
+      if (
+        n.type === 'CallExpression' &&
+        (n as CallExpression).callee.type === 'MemberExpression'
+      ) {
+        const callee = (n as CallExpression).callee as MemberExpression;
+        const prop = callee.property;
+        const propName = prop.type === 'Identifier' ? (prop as Identifier).name : '';
+        if (propName === 'status' || propName === 'sendStatus') {
+          const firstArg = (n as CallExpression).arguments[0];
+          if (firstArg?.type === 'NumericLiteral') {
+            statusCode = (firstArg as { value: number }).value;
+          }
+        }
+      }
+      for (const key of Object.keys(n)) {
+        const child = (n as Record<string, unknown>)[key];
+        if (Array.isArray(child)) {
+          for (const item of child) {
+            if (item && typeof item === 'object' && 'type' in item) { scan(item as Node); }
+          }
+        } else if (child && typeof child === 'object' && 'type' in child) {
+          scan(child as Node);
+        }
+      }
+    };
+    scan(body);
+    if (statusCode !== undefined) {
+      if (statusCode >= 400 && statusCode < 500) { return `${statusCode} handler`; }
+      if (statusCode >= 500 && statusCode < 600) { return `${statusCode} handler`; }
+    }
+  }
+
+  return 'catch-all handler';
+}
+
 function getResParamName(handler: Node): string {
   const params: Array<Node | PatternLike | RestElement> =
     (handler as { params?: Array<Node | PatternLike | RestElement> }).params ?? [];
@@ -661,11 +715,16 @@ async function analyzeFile(
 
           // Middleware function or named reference
           if (isFunctionLike(handlerArg) || argName) {
+            const explicitName = getFunctionName(handlerArg);
+            // Catch-all: anonymous inline function registered globally (no path mount,
+            // or mounted at '/') — these are 404/error handlers, not pipeline middleware.
+            const isCatchAll = isGlobal && isFunctionLike(handlerArg) && !explicitName;
             const entry: MiddlewareEntry = {
-              name: getFunctionName(handlerArg),
+              name: explicitName ?? (isCatchAll ? inferCatchAllName(handlerArg) : undefined),
               file: filePath,
               line: handlerArg.loc?.start.line ?? 0,
               scope: isGlobal ? 'global' : 'router',
+              isCatchAll,
             };
             state.middleware.push(entry);
 

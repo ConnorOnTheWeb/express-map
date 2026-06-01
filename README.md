@@ -46,7 +46,7 @@ Template files that are never referenced by any `res.render()` call appear under
 Multiple handlers registered for the same `METHOD /path` combination are grouped under **Duplicate Routes**.
 
 ### Multi-Project / Monorepo Support
-Express Map works whether you open a single Express project, a multi-root VS Code workspace, or a parent directory containing several Express apps. All Express projects found are analysed and each project becomes a top-level folder in the tree. Every section — Routes, Templates, Middleware, Orphaned Templates, Duplicate Routes, Broken References, and Potential Issues — is grouped under its own project:
+Express Map works whether you open a single Express project, a multi-root VS Code workspace, or a parent directory containing several Express apps. All Express projects found are analysed and each project becomes a top-level folder in the tree. Every section — Routes, Templates, Middleware, Catch-all Handlers, Orphaned Templates, Duplicate Routes, Broken References, and Potential Issues — is grouped under its own project:
 
 ```
 ▶ my-api

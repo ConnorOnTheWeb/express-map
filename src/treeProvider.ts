@@ -17,6 +17,7 @@ type ItemKind =
   | 'templateRoute'
   | 'orphan'
   | 'middleware'
+  | 'catchAll'
   | 'duplicateGroup'
   | 'duplicateRoute'
   | 'brokenRef'
@@ -328,6 +329,28 @@ function makeMiddlewareItem(mw: MiddlewareEntry): ExpressMapItem {
   });
 }
 
+function catchAllTooltip(mw: MiddlewareEntry): vscode.MarkdownString {
+  const md = new vscode.MarkdownString(undefined, true);
+  md.supportThemeIcons = true;
+  md.appendMarkdown(`**Catch-all handler** — registered at the bottom of the middleware stack\n\n`);
+  md.appendMarkdown(`- File: \`${shortPath(mw.file)}\` line ${mw.line}\n`);
+  if (mw.name) { md.appendMarkdown(`- Type: \`${mw.name}\`\n`); }
+  return md;
+}
+
+function makeCatchAllItem(mw: MiddlewareEntry): ExpressMapItem {
+  return new ExpressMapItem({
+    label: mw.name ?? 'catch-all handler',
+    kind: 'catchAll',
+    description: `${shortPath(mw.file)}:${mw.line}`,
+    tooltip: catchAllTooltip(mw),
+    iconPath: new vscode.ThemeIcon('debug-step-over'),
+    targetUri: vscode.Uri.file(mw.file),
+    targetLine: mw.line,
+    middlewareData: mw,
+  });
+}
+
 function makeDuplicateGroupItem(routes: Route[]): ExpressMapItem {
   const key = `${routes[0].method} ${routes[0].resolvedPath}`;
   return new ExpressMapItem({
@@ -599,8 +622,12 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
       makeGroup('Templates', 'group', templates.length, 'file-code', true),
     ];
 
-    const globalMw = middleware.filter(m => m.scope !== 'route');
+    const globalMw = middleware.filter(m => m.scope !== 'route' && !m.isCatchAll);
     groups.push(makeGroup('Middleware', 'group', globalMw.length, 'symbol-function', true));
+    const catchAllMw = middleware.filter(m => m.isCatchAll);
+    if (catchAllMw.length > 0) {
+      groups.push(makeGroup('Catch-all Handlers', 'group', catchAllMw.length, 'debug-step-over', true));
+    }
 
     if (orphanedTemplates.length > 0) {
       groups.push(makeGroup('Orphaned Templates', 'group', orphanedTemplates.length, 'warning', true));
@@ -660,9 +687,18 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
           const filtered = (projectRoot
             ? middleware.filter(m => m.projectRoot === projectRoot)
             : middleware
-          ).filter(m => m.scope !== 'route');
+          ).filter(m => m.scope !== 'route' && !m.isCatchAll);
           if (filtered.length === 0) { return [makeEmptyItem('No global or router middleware')]; }
           return filtered.map(makeMiddlewareItem);
+        }
+
+        case 'Catch-all Handlers': {
+          const filtered = (projectRoot
+            ? middleware.filter(m => m.projectRoot === projectRoot)
+            : middleware
+          ).filter(m => m.isCatchAll);
+          if (filtered.length === 0) { return [makeEmptyItem('No catch-all handlers')]; }
+          return filtered.map(makeCatchAllItem);
         }
 
         case 'Orphaned Templates': {
@@ -705,7 +741,8 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
 
       const projectRoutes = routes.filter(r => r.projectRoot === projectRoot);
       const projectTemplates = templates.filter(t => t.projectRoot === projectRoot);
-      const projectMw = middleware.filter(m => m.projectRoot === projectRoot && m.scope !== 'route');
+      const projectMw = middleware.filter(m => m.projectRoot === projectRoot && m.scope !== 'route' && !m.isCatchAll);
+      const projectCatchAll = middleware.filter(m => m.projectRoot === projectRoot && m.isCatchAll);
       const projectOrphans = orphanedTemplates.filter(o => o.projectRoot === projectRoot);
       const projectDuplicates = duplicateRoutes.filter(g => g[0]?.projectRoot === projectRoot);
       const projectBrokenRefs = brokenRefs.filter(r => r.projectRoot === projectRoot);
@@ -721,6 +758,9 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
         makeProjectSubGroup('Templates', projectTemplates.length, 'file-code', projectRoot, element),
         makeProjectSubGroup('Middleware', projectMw.length, 'symbol-function', projectRoot, element),
       ];
+      if (projectCatchAll.length > 0) {
+        groups.push(makeProjectSubGroup('Catch-all Handlers', projectCatchAll.length, 'debug-step-over', projectRoot, element));
+      }
       if (projectOrphans.length > 0) {
         groups.push(makeProjectSubGroup('Orphaned Templates', projectOrphans.length, 'warning', projectRoot, element));
       }

@@ -3,6 +3,17 @@
 All notable changes to Express Map are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.0.11] — 2026-05-31
+
+### Added
+
+- **Catch-all Handlers section.** `app.use()` handlers registered globally (at `/`) without a named function are now classified as catch-all handlers rather than ordinary middleware and appear in a separate **Catch-all Handlers** group in the tree. This keeps the Middleware list clean and clearly distinguishes terminal handlers (404 handler, error handler) from pipeline middleware.
+- **Smart naming for catch-all handlers.** Anonymous inline functions no longer show `(anonymous)` — they are automatically named by inspecting their signature and body:
+  - 4-parameter signature `(err, req, res, next)` → `error handler`
+  - Body calls `res.status(404)` or `res.sendStatus(404)` → `404 handler`
+  - Other 4xx/5xx status codes → e.g. `500 handler`
+  - Any other catch-all inline function → `catch-all handler`
+
 ## [1.0.10] — 2026-05-31
 
 ### Fixed
