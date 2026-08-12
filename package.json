@@ -2,7 +2,7 @@
   "name": "express-map",
   "displayName": "Express Map",
   "description": "Visual route, middleware, and template navigation for Express apps",
-  "version": "1.0.11",
+  "version": "1.2.0",
   "publisher": "connorontheweb",
   "license": "MIT",
   "icon": "media/express-map.png",
@@ -46,6 +46,46 @@
     }
   },
   "contributes": {
+    "configuration": {
+      "title": "Express Map",
+      "properties": {
+        "expressMap.diagnostics.brokenTemplateRef.severity": {
+          "type": "string",
+          "enum": ["error", "warning", "information", "hint", "off"],
+          "enumDescriptions": [
+            "Report as an error (default).",
+            "Report as a warning.",
+            "Report as information.",
+            "Underline in the editor only, without adding an entry to the Problems panel.",
+            "Do not report at all."
+          ],
+          "default": "error",
+          "markdownDescription": "Severity for `res.render('name')` calls naming a template that isn't in the views directory.\n\nTurn this down for apps that register view directories at runtime, or render templates produced by a build step, where the file is genuinely absent from the source tree and genuinely present when the app runs.\n\nThe **Broken References** section of the tree is unaffected by this setting.",
+          "scope": "resource"
+        },
+        "expressMap.diagnostics.asyncErrorHandling.severity": {
+          "type": "string",
+          "enum": ["error", "warning", "information", "hint", "off"],
+          "enumDescriptions": [
+            "Report as an error.",
+            "Report as a warning (default).",
+            "Report as information.",
+            "Underline in the editor only, without adding an entry to the Problems panel.",
+            "Do not report at all."
+          ],
+          "default": "warning",
+          "markdownDescription": "Severity for async route handlers with no `try`/`catch`.\n\nThis is already suppressed automatically for projects where the framework catches rejected promises — Express 5, or `express-async-errors` / `express-async-handler` in the dependency list — and for handlers wrapped in a helper such as `asyncHandler(...)`. Use this if your error handling takes a form Express Map can't see.\n\nThe **Potential Issues** section of the tree is unaffected by this setting.",
+          "scope": "resource"
+        },
+        "expressMap.excludeDirs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Additional directory names to skip when scanning the views directory for template files — for example `[\"dist\", \"build\", \"coverage\"]`.\n\nThese are directory *names*, not glob patterns: a name listed here is skipped wherever it appears in the walk. `node_modules`, `.git` and `out` are always skipped and don't need listing.\n\nUseful when a build step copies compiled templates into the views tree, which would otherwise show up as duplicate or orphaned templates.",
+          "scope": "window"
+        }
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -145,7 +185,8 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:analyzer": "npm run compile && node test/analyzer.test.mjs"
   },
   "devDependencies": {
     "@types/babel__traverse": "^7.28.0",

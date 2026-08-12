@@ -39,6 +39,11 @@ Routes that call `res.render('some/view')` where `some/view` doesn't exist in th
 ### Potential Issues
 Async route handlers that have no `try/catch` block are highlighted with a warning — unhandled rejections crash the server in Node.js.
 
+The warning is suppressed automatically where the errors are already handled: on Express 5, in projects with `express-async-errors` or `express-async-handler` installed, and for handlers wrapped in a helper such as `asyncHandler(...)` or `catchAsync(...)`.
+
+### Wrapped Handlers
+`app.get('/x', asyncHandler(async (req, res) => …))` is read through the wrapper, so the route is correctly reported as async and its `res.render()` calls are found even when the response parameter isn't named `res`. Any single-argument wrapper works — the shape is what's recognised, not a list of names.
+
 ### Orphaned Templates
 Template files that are never referenced by any `res.render()` call appear under **Orphaned Templates**.
 
@@ -153,13 +158,38 @@ No configuration is needed. Express Map discovers your app's entry point, views 
 | Array mount paths `app.use(['/a', '/b'], fn)` | — | ✓ |
 | Async errors caught by framework | No — warnings shown | Yes — warnings suppressed |
 
-The detected Express version is shown in the status bar tooltip. If you are on Express 4 and want to suppress the async-without-try/catch warnings, install `express-async-errors` or upgrade to Express 5.
+The detected Express version is shown in the status bar tooltip. If you are on Express 4 and want to suppress the async-without-try/catch warnings, install `express-async-errors`, wrap your handlers in a helper like `asyncHandler(...)`, upgrade to Express 5, or set `expressMap.diagnostics.asyncErrorHandling.severity` to `off`.
 
 ---
 
 ## Extension Settings
 
-Express Map has no user-configurable settings.
+Express Map still needs no configuration — the entry point, views directory and template engine are all discovered from your app, and every setting below defaults to the behaviour you get without touching it. These are escape hatches, not setup.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `expressMap.diagnostics.brokenTemplateRef.severity` | `error` | Severity for `res.render()` naming a template that isn't in the views directory |
+| `expressMap.diagnostics.asyncErrorHandling.severity` | `warning` | Severity for async handlers with no `try`/`catch` |
+| `expressMap.excludeDirs` | `[]` | Extra directory names to skip when scanning for templates |
+
+Both severity settings accept `error`, `warning`, `information`, `hint`, or `off`. **`hint` is usually better than `off`** — it keeps the underline in the editor while adding nothing to the Problems panel.
+
+Severities are read per folder, so a multi-root workspace can turn a check off for one project and keep it in the others.
+
+**The tree is unaffected by the severity settings.** Turning a diagnostic off removes it from the Problems panel and the editor; **Broken References** and **Potential Issues** still list everything found. The panel is somewhere you go to look rather than something that interrupts you.
+
+**When you'd turn each one down:**
+
+- **`brokenTemplateRef`** — apps that register view directories at runtime, or render templates produced by a build step, where the file is genuinely absent from the source tree and genuinely present when the app runs.
+- **`asyncErrorHandling`** — already suppressed automatically for Express 5, for projects with `express-async-errors` or `express-async-handler` in their dependencies, and for handlers wrapped in a helper like `asyncHandler(...)`. Turn it down if your error handling takes a form Express Map can't see.
+
+**`expressMap.excludeDirs`** takes directory *names*, not globs — a name listed here is skipped wherever it appears in the walk. `node_modules`, `.git` and `out` are always skipped. The usual reason to add to it is a build step that copies compiled templates into the views tree, which otherwise shows up as duplicate and orphaned templates:
+
+```jsonc
+{
+  "expressMap.excludeDirs": ["dist", "build"]
+}
+```
 
 ---
 

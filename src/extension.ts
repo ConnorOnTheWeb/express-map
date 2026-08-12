@@ -3,6 +3,14 @@ import { analyzeWorkspace, findExpressRoots, mergeExpressApps } from './analyzer
 import { ExpressMapProvider, ExpressMapItem } from './treeProvider';
 import type { Grouping } from './treeProvider';
 import type { ExpressApp, Route, Template } from './types';
+import { hasAsyncIssue } from './routeChecks';
+import {
+  affectsAnalysis,
+  affectsThisExtension,
+  asyncErrorHandlingSeverity,
+  brokenTemplateRefSeverity,
+  excludeDirs,
+} from './config';
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
@@ -35,34 +43,44 @@ function updateDiagnostics(
     byFile.set(file, list);
   };
 
-  // Broken template references — error severity
+  // Severity is read per source file rather than once for the whole run, so a
+  // multi-root window can turn a check off for one project and keep it in the
+  // others. `undefined` means the setting is 'off'.
+  const brokenRefSeverityFor = (file: string) =>
+    brokenTemplateRefSeverity(vscode.Uri.file(file));
+  const asyncSeverityFor = (file: string) =>
+    asyncErrorHandlingSeverity(vscode.Uri.file(file));
+
+  // Broken template references — error severity by default
   for (const ref of result.brokenRefs) {
+    const severity = brokenRefSeverityFor(ref.file);
+    if (severity === undefined) { continue; }
     const diag = new vscode.Diagnostic(
       new vscode.Range(ref.line - 1, 0, ref.line - 1, Number.MAX_SAFE_INTEGER),
       `Express Map: template '${ref.templateName}' not found in views directory`,
-      vscode.DiagnosticSeverity.Error,
+      severity,
     );
     diag.source = 'Express Map';
     diag.code = 'broken-template-ref';
     push(ref.file, diag);
   }
 
-  // Async handlers without try/catch — warning severity
-  // Uses the per-route asyncErrorsSafe flag so multi-project workspaces don't
-  // produce false positives: Express 5 routes are never warned even when a
-  // sibling project uses Express 4 without an async-error patch.
+  // Async handlers without try/catch — warning severity by default.
+  // See hasAsyncIssue() for what qualifies; the same predicate drives the tree
+  // and the language model tool so all three agree about any given route.
   for (const route of result.routes) {
-    if (route.isAsync && !route.hasTryCatch && !route.asyncErrorsSafe) {
-      const diag = new vscode.Diagnostic(
-        new vscode.Range(route.line - 1, 0, route.line - 1, Number.MAX_SAFE_INTEGER),
-        `Express Map: async route ${route.method} ${route.resolvedPath} has no try/catch — ` +
-          `unhandled rejections hang the request and crash the server (Express 4 / Node 15+)`,
-        vscode.DiagnosticSeverity.Warning,
-      );
-      diag.source = 'Express Map';
-      diag.code = 'async-no-error-handling';
-      push(route.file, diag);
-    }
+    if (!hasAsyncIssue(route)) { continue; }
+    const severity = asyncSeverityFor(route.file);
+    if (severity === undefined) { continue; }
+    const diag = new vscode.Diagnostic(
+      new vscode.Range(route.line - 1, 0, route.line - 1, Number.MAX_SAFE_INTEGER),
+      `Express Map: async route ${route.method} ${route.resolvedPath} has no try/catch — ` +
+        `unhandled rejections hang the request and crash the server (Express 4 / Node 15+)`,
+      severity,
+    );
+    diag.source = 'Express Map';
+    diag.code = 'async-no-error-handling';
+    push(route.file, diag);
   }
 
   for (const [file, diags] of byFile) {
@@ -142,9 +160,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return;
     }
 
+    const analyzeOptions = { excludeDirs: excludeDirs() };
+
     let results: ExpressApp[];
     try {
-      results = await Promise.all(expressRoots.map(root => analyzeWorkspace(root)));
+      results = await Promise.all(
+        expressRoots.map(root => analyzeWorkspace(root, analyzeOptions)),
+      );
     } catch (err) {
       provider.setNoAppFound();
       statusBar.text = '$(warning) Analysis failed';
@@ -239,6 +261,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       runAnalysis().catch(err =>
         console.error('[Express Map] Workspace-folders-change analysis error:', err),
       );
+    }),
+  );
+
+  // React to settings changes. Two tiers, because they cost differently:
+  // the exclude list changes which files are read and needs a full re-analysis,
+  // while a severity change only affects how the last result is reported and
+  // can reuse it. Doing nothing here would leave squiggles in place after a
+  // check is turned off, which reads as the setting not working.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(event => {
+      if (!affectsThisExtension(event)) { return; }
+      if (affectsAnalysis(event)) {
+        runAnalysis().catch(err =>
+          console.error('[Express Map] Configuration-change analysis error:', err),
+        );
+      } else if (lastResult) {
+        updateDiagnostics(diagnosticCollection, lastResult);
+      }
     }),
   );
 
@@ -484,7 +524,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             routes: lastResult.routes.length,
             templates: lastResult.templates.length,
             brokenTemplateRefs: lastResult.brokenRefs.length,
-            asyncWithoutTryCatch: lastResult.routes.filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe).length,
+            asyncWithoutTryCatch: lastResult.routes.filter(hasAsyncIssue).length,
             duplicateRoutes: lastResult.duplicateRoutes.length,
             orphanedTemplates: lastResult.orphanedTemplates.length,
             viewEngine: lastResult.viewEngine || 'unknown',
@@ -511,7 +551,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             line: b.line,
           })),
           asyncWithoutTryCatch: lastResult.routes
-            .filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe)
+            .filter(hasAsyncIssue)
             .map(r => ({ method: r.method, path: r.resolvedPath, file: relativePath(r.file), line: r.line })),
           duplicateRoutes: lastResult.duplicateRoutes.map(group =>
             group.map(r => ({ method: r.method, path: r.resolvedPath, file: relativePath(r.file), line: r.line }))

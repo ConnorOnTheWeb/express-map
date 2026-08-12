@@ -3,6 +3,66 @@
 All notable changes to Express Map are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.2.0] — 2026-08-12
+
+### Fixed
+
+- **Route handlers wrapped in a helper were analysed as the wrapper, not the handler.** `app.get('/x', asyncHandler(async (req, res) => …))` registers a `CallExpression`, not a function, and every read of a handler goes through `isFunctionLike` first. So a wrapped route came out with `isAsync: false` — reported as synchronous in the tree tooltip and to the Copilot tool — regardless of the `async` sitting right there in the source.
+
+  The costlier half was template detection. `getResParamName` is called only when the handler is function-like and otherwise falls back to the literal string `res`, so a wrapped handler whose response parameter was named anything else had its `res.render()` calls go unrecognised: no template on the route, no CodeLens `renders …`, no clickable link, and the template itself counted as **orphaned** because nothing appeared to reference it. `asyncHandler(async (req, reply) => reply.render('dash'))` produced a route with no template and an orphan entry for `dash`.
+
+  A one-argument call whose only argument is a function literal is now unwrapped, and everything downstream reads the function inside it. The shape is deliberately narrow rather than matched against a list of wrapper names — `asyncHandler`, `catchAsync`, `wrapAsync`, `express-async-handler` and every in-house equivalent share that shape, and the list of names has no end.
+
+  Measured against the real analyser on a fixture app: before, `/wrapped` reported `isAsync: false`, `templateName: undefined`, `responseType: 'unknown'`. After, `true`, `'dash'`, `'render'`. Four assertions changed and no others.
+
+### Changed
+
+- **No new warnings, by construction.** Seeing a wrapped handler as async for the first time would otherwise have exposed it to the async-without-try/catch check — turning a data fix into a wave of warnings on code that was never flagged before. Routes resolved through a wrapper are marked `wrappedHandler` and are exempt: a wrapper taking a single handler exists to do something with what that handler throws, and its body isn't visible from the call site to prove otherwise.
+
+  The set of warnings is identical to 1.1.0 for every input, not merely similar. A warning could only have fired when `isAsync` was true, which required the handler to be function-like, which means it was never a wrapper call and unwrapping is a no-op for it. Confirmed by measurement rather than argument: with the unwrap disabled, exactly four assertions in the new suite fail and the async-issue assertions are not among them.
+
+- **A two-argument call is not a wrapper.** `withOptions(handler, { retries: 2 })` is left alone, since the second argument means the call is doing something other than adapting a handler and its return value can't be assumed to be one. Covered by a test in that direction.
+
+### Added
+
+- **A test suite for the analyser** (`npm run test:analyzer`), replacing the generated placeholder that asserted `[1,2,3].indexOf(5) === -1`. `analyzer.ts` imports no `vscode` API — only `fs`, `path` and Babel — so the tests write a real Express app to a temp directory and read it off disk, with no extension host and no downloaded VS Code build. A hand-built AST wouldn't have exercised entry-point discovery, the require walk or the views scan, which is where these bugs live.
+
+  24 checks: the four route shapes (bare async, wrapped async, async with try/catch, synchronous) against `isAsync`, `hasTryCatch`, `wrappedHandler`, `templateName`, `responseType` and the async-issue predicate, the two-argument non-wrapper, and the template walk with and without `excludeDirs`.
+
+---
+
+## [1.1.0] — 2026-08-12
+
+### Added
+
+- **Settings, for the first time.** The extension contributed no `configuration` block and called `getConfiguration` nowhere. "No configuration required" is the right default and still holds — every setting here defaults to existing behaviour — but it had become "no configuration possible", and the two diagnostics land in the Problems panel with no way to silence them.
+
+  | Setting | Default |
+  |---|---|
+  | `expressMap.diagnostics.brokenTemplateRef.severity` | `error` |
+  | `expressMap.diagnostics.asyncErrorHandling.severity` | `warning` |
+  | `expressMap.excludeDirs` | `[]` |
+
+  Deliberately not settings: the views directory, template engine and entry point, all of which are discovered from the app itself and must not become the user's problem, and the route grouping, which is already a one-click control that remembers its own state.
+
+- **Severity enums rather than on/off booleans**, with `hint` as the value that earns the enum — underline in the editor, no entry in the Problems panel. `error`, `warning`, `information` and `off` are the rest.
+
+- **`expressMap.excludeDirs`, for directories the template walk shouldn't descend into.** `node_modules`, `.git` and `out` were hardcoded in two separate walks, so a build step that copies compiled templates into the views tree produced duplicate and orphaned entries with no way to suppress them. These are directory *names* rather than globs, because names are what the walk compares as it descends.
+
+- **Both tree sections are unaffected by the severity settings.** Turning a diagnostic off removes it from the Problems panel and the editor; **Broken References** and **Potential Issues** still list what was found. The panel is a place you go to look, not something that interrupts you, so silencing a squiggle shouldn't also hide the inventory.
+
+### Changed
+
+- **The async-issue condition lives in one place now.** `isAsync && !hasTryCatch && !asyncErrorsSafe` had been written out by hand in five places — the diagnostic, the Copilot tool's summary count and its issue list, and three groupings in the tree. Any change to it had to land in all five or the Problems entry, the tree badge and the AI summary would disagree about the same route. It is now a single `hasAsyncIssue` predicate that all five call, which is what made the 1.2.0 change to it a one-line edit instead of a five-site hunt.
+
+- **Analysis re-runs on a settings change, but only when it has to.** `excludeDirs` changes which files are read and triggers a full re-analysis; a severity change only affects how the last result is reported and reuses it. Doing nothing would have left squiggles in place after a check was turned off, which reads as the setting not working.
+
+- **Diagnostic severity is resolved per source file** rather than once per run, so a multi-root window can turn a check off for one project and keep it in the others. `excludeDirs` is window-scoped instead, since analysis runs per project root rather than per open file.
+
+- **`analyzeWorkspace` takes an options argument** (`analyzeWorkspace(root, { excludeDirs })`), keeping `analyzer.ts` free of the `vscode` import. Reading settings inside it would have made the analyser untestable outside an extension host, which is what the 1.2.0 test suite depends on.
+
+---
+
 ## [1.0.11] — 2026-05-31
 
 ### Added

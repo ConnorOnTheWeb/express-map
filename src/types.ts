@@ -41,6 +41,16 @@ export interface Route {
   line: number;
   isAsync: boolean;
   hasTryCatch: boolean;   // false = async handler with no try/catch (potential crash)
+  /**
+   * True when the registered handler was a wrapper call around a single
+   * function — `asyncHandler(async (req, res) => …)` — and the flags above
+   * describe the function inside it rather than the call.
+   *
+   * Such routes never raise the async-without-try/catch warning: a wrapper
+   * taking one handler exists to do something with what that handler throws,
+   * and its body isn't visible from the call site to prove otherwise.
+   */
+  wrappedHandler?: boolean;
   params: string[];
   responseType: 'render' | 'json' | 'send' | 'redirect' | 'download' | 'unknown';
   templateName?: string;

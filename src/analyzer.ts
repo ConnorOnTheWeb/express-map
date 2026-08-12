@@ -25,6 +25,13 @@ import type { ExpressApp, Route, MiddlewareEntry, Template, OrphanedTemplate, Ro
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
+/**
+ * Directory names never descended into when walking for template files.
+ * Callers can add to this via `AnalyzeOptions.excludeDirs`; they cannot remove
+ * from it, because nothing worth finding lives in any of these.
+ */
+const DEFAULT_EXCLUDED_DIRS = ['node_modules', '.git', 'out'];
+
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'all']);
 const ENTRY_FALLBACKS = ['app.js', 'server.js', 'index.js'];
 const RESPONSE_METHODS = new Set<Route['responseType']>(['render', 'json', 'send', 'redirect', 'download']);
@@ -121,6 +128,39 @@ function isExpressRouterCall(node: Node, expressVarNames: Set<string>): boolean 
 
 function isFunctionLike(node: Node): boolean {
   return node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression';
+}
+
+/**
+ * Sees through a wrapper call to the handler function inside it.
+ *
+ * `app.get('/x', asyncHandler(async (req, res) => …))` registers a
+ * `CallExpression`, not a function, so everything that reads a handler by
+ * looking at its node — is it async, what is its `res` parameter called, which
+ * templates does it render — was reading the wrapper and finding nothing.
+ * `getResParamName` in particular fell back to the literal name `res`, so a
+ * wrapped handler whose second parameter was called anything else had its
+ * `res.render()` calls go unrecognised and its template counted as orphaned.
+ *
+ * The shape recognised is deliberately narrow: a call taking exactly one
+ * argument, which is a function literal. That is what every async wrapper in
+ * circulation looks like (`asyncHandler`, `catchAsync`, `wrapAsync`,
+ * `express-async-handler`), and it is specific enough not to need a list of
+ * names to match against — which is good, because that list has no end.
+ *
+ * Routes resolved this way are marked `wrappedHandler` and never raise the
+ * async-without-try/catch warning: a wrapper taking a single handler exists to
+ * do something with what that handler throws, and its body is not visible from
+ * the call site to prove otherwise. That flag is what keeps this change from
+ * introducing warnings, since these handlers are now correctly seen as async
+ * where before they were invisible.
+ */
+function unwrapHandler(node: Node): Node | undefined {
+  if (node.type !== 'CallExpression') { return undefined; }
+  const args = (node as CallExpression).arguments;
+  if (args.length !== 1) { return undefined; }
+  const inner = args[0];
+  if (inner.type === 'SpreadElement') { return undefined; }
+  return isFunctionLike(inner as Node) ? (inner as Node) : undefined;
 }
 
 function isAsyncNode(node: Node): boolean {
@@ -625,8 +665,14 @@ async function analyzeFile(
         const middlewareArgs = args.slice(1, -1);
         const handlerArg = args[args.length - 1];
 
-        const resName = isFunctionLike(handlerArg) ? getResParamName(handlerArg) : 'res';
-        const { type: responseType, templateName, templatePrefix, extraTemplateRefs, extraTemplatePrefixes } = detectResponse(handlerArg, resName);
+        // Read the function inside a wrapper call rather than the call itself,
+        // so `asyncHandler(async (req, reply) => reply.render('x'))` is
+        // analysed as the handler it is. See unwrapHandler().
+        const unwrapped = unwrapHandler(handlerArg);
+        const effectiveHandler = unwrapped ?? handlerArg;
+
+        const resName = isFunctionLike(effectiveHandler) ? getResParamName(effectiveHandler) : 'res';
+        const { type: responseType, templateName, templatePrefix, extraTemplateRefs, extraTemplatePrefixes } = detectResponse(effectiveHandler, resName);
         if (templateName) { state.templateRefs.add(templateName); }
         if (templatePrefix) { state.templateRefPrefixes.add(templatePrefix); }
         for (const ref of extraTemplateRefs) { state.templateRefs.add(ref); }
@@ -642,8 +688,9 @@ async function analyzeFile(
           }));
 
         const methodLabel = method === 'all' ? 'ALL' : method.toUpperCase();
-        const isAsync = isFunctionLike(handlerArg) ? isAsyncNode(handlerArg) : false;
-        const hasTryCatch = handlerHasTryCatch(handlerArg);
+        const isAsync = isFunctionLike(effectiveHandler) ? isAsyncNode(effectiveHandler) : false;
+        const hasTryCatch = handlerHasTryCatch(effectiveHandler);
+        const wrappedHandler = unwrapped !== undefined;
 
         // Register one route entry per path (array paths mount the same handler at multiple URLs)
         for (const rawPath of rawPaths) {
@@ -656,6 +703,7 @@ async function analyzeFile(
             line,
             isAsync,
             hasTryCatch,
+            wrappedHandler,
             params: extractPathParams(resolvedPath),
             responseType,
             templateName,
@@ -782,7 +830,11 @@ const ALL_TEMPLATE_EXTS = new Set(
  * If the engine is unknown or not declared, probes the views directory to see
  * which extension(s) actually appear there and picks the most common ones.
  */
-function resolveTemplateExtensions(viewsDir: string, viewEngine: string | null): string[] {
+function resolveTemplateExtensions(
+  viewsDir: string,
+  viewEngine: string | null,
+  excluded: Set<string>,
+): string[] {
   if (viewEngine) {
     const exts = ENGINE_EXTENSIONS[viewEngine];
     if (exts) { return exts; }
@@ -795,7 +847,7 @@ function resolveTemplateExtensions(viewsDir: string, viewEngine: string | null):
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
     catch { return; }
     for (const entry of entries) {
-      if (entry.isDirectory() && !['node_modules', '.git', 'out'].includes(entry.name)) {
+      if (entry.isDirectory() && !excluded.has(entry.name)) {
         probe(path.join(dir, entry.name));
       } else if (entry.isFile()) {
         const ext = path.extname(entry.name).toLowerCase();
@@ -812,7 +864,11 @@ function resolveTemplateExtensions(viewsDir: string, viewEngine: string | null):
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([ext]) => ext);
 }
 
-function findTemplateFiles(dir: string, extensions: string[]): string[] {
+function findTemplateFiles(
+  dir: string,
+  extensions: string[],
+  excluded: Set<string>,
+): string[] {
   const extSet = new Set(extensions);
   const results: string[] = [];
 
@@ -823,7 +879,7 @@ function findTemplateFiles(dir: string, extensions: string[]): string[] {
     for (const entry of entries) {
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) {
-        if (!['node_modules', '.git', 'out'].includes(entry.name)) { walk(full); }
+        if (!excluded.has(entry.name)) { walk(full); }
       } else if (entry.isFile() && extSet.has(path.extname(entry.name).toLowerCase())) {
         results.push(full);
       }
@@ -941,7 +997,24 @@ export function mergeExpressApps(apps: ExpressApp[]): ExpressApp {
   };
 }
 
-export async function analyzeWorkspace(workspaceRoot: string): Promise<ExpressApp> {
+/** Caller-supplied knobs for one analysis run. */
+export interface AnalyzeOptions {
+  /**
+   * Extra directory names to skip when walking for template files, on top of
+   * the always-excluded `node_modules`, `.git` and `out`.
+   */
+  excludeDirs?: string[];
+}
+
+export async function analyzeWorkspace(
+  workspaceRoot: string,
+  options: AnalyzeOptions = {},
+): Promise<ExpressApp> {
+  const excludedDirs = new Set([
+    ...DEFAULT_EXCLUDED_DIRS,
+    ...(options.excludeDirs ?? []),
+  ]);
+
   const empty: ExpressApp = {
     routes: [],
     middleware: [],
@@ -995,9 +1068,9 @@ export async function analyzeWorkspace(workspaceRoot: string): Promise<ExpressAp
 
   // Resolve views directory and template engine
   const viewsDir = state.viewsDir ?? path.join(state.entryDir, 'views');
-  const templateExts = resolveTemplateExtensions(viewsDir, state.viewEngine);
+  const templateExts = resolveTemplateExtensions(viewsDir, state.viewEngine, excludedDirs);
   const viewEngine = state.viewEngine ?? (templateExts[0]?.replace(/^\./,'') ?? 'ejs');
-  const templateFiles = findTemplateFiles(viewsDir, templateExts);
+  const templateFiles = findTemplateFiles(viewsDir, templateExts, excludedDirs);
 
   // ── File-wide render scan ─────────────────────────────────────────────────
   // Walk every analysed JS/TS file and collect res.render() calls that were

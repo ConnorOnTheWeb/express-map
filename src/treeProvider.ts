@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import type { ExpressApp, Route, MiddlewareEntry, Template, OrphanedTemplate, RouteRef, BrokenRef } from './types';
+import { hasAsyncIssue } from './routeChecks';
 
 export type Grouping = 'prefix' | 'file' | 'method';
 
@@ -640,7 +641,7 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
     }
     // Async issues are only meaningful per-route (asyncErrorsSafe is stamped per-project
     // by the analyser, so Express 5 routes are excluded even in mixed workspaces).
-    const asyncIssues = routes.filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe);
+    const asyncIssues = routes.filter(hasAsyncIssue);
     if (asyncIssues.length > 0) {
       groups.push(makeGroup('Potential Issues', 'group', asyncIssues.length, 'warning', true));
     }
@@ -724,7 +725,7 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
 
         case 'Potential Issues': {
           const scopedRoutes = projectRoot ? routes.filter(r => r.projectRoot === projectRoot) : routes;
-          const issues = scopedRoutes.filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe);
+          const issues = scopedRoutes.filter(hasAsyncIssue);
           if (issues.length === 0) { return [makeEmptyItem('No issues found')]; }
           return issues.map(makeIssueRouteItem);
         }
@@ -746,7 +747,7 @@ export class ExpressMapProvider implements vscode.TreeDataProvider<ExpressMapIte
       const projectOrphans = orphanedTemplates.filter(o => o.projectRoot === projectRoot);
       const projectDuplicates = duplicateRoutes.filter(g => g[0]?.projectRoot === projectRoot);
       const projectBrokenRefs = brokenRefs.filter(r => r.projectRoot === projectRoot);
-      const projectIssues = projectRoutes.filter(r => r.isAsync && !r.hasTryCatch && !r.asyncErrorsSafe);
+      const projectIssues = projectRoutes.filter(hasAsyncIssue);
 
       // The Routes sub-group MUST be the same cached object used as parentItem for
       // prefix/route items in refresh() — required for getParent() reveal chain.
