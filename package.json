@@ -2,7 +2,7 @@
   "name": "express-map",
   "displayName": "Express Map",
   "description": "Visual route, middleware, and template navigation for Express apps",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "publisher": "connorontheweb",
   "license": "MIT",
   "icon": "media/express-map.png",
@@ -54,7 +54,13 @@
       "properties": {
         "expressMap.diagnostics.brokenTemplateRef.severity": {
           "type": "string",
-          "enum": ["error", "warning", "information", "hint", "off"],
+          "enum": [
+            "error",
+            "warning",
+            "information",
+            "hint",
+            "off"
+          ],
           "enumDescriptions": [
             "Report as an error (default).",
             "Report as a warning.",
@@ -68,7 +74,13 @@
         },
         "expressMap.diagnostics.asyncErrorHandling.severity": {
           "type": "string",
-          "enum": ["error", "warning", "information", "hint", "off"],
+          "enum": [
+            "error",
+            "warning",
+            "information",
+            "hint",
+            "off"
+          ],
           "enumDescriptions": [
             "Report as an error.",
             "Report as a warning (default).",
@@ -82,7 +94,9 @@
         },
         "expressMap.excludeDirs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "markdownDescription": "Additional directory names to skip when scanning the views directory for template files — for example `[\"dist\", \"build\", \"coverage\"]`.\n\nThese are directory *names*, not glob patterns: a name listed here is skipped wherever it appears in the walk. `node_modules`, `.git` and `out` are always skipped and don't need listing.\n\nUseful when a build step copies compiled templates into the views tree, which would otherwise show up as duplicate or orphaned templates.",
           "scope": "window"
@@ -162,7 +176,13 @@
     "languageModelTools": [
       {
         "name": "express-map_analyzeApp",
-        "tags": ["express", "routes", "api", "templates", "middleware"],
+        "tags": [
+          "express",
+          "routes",
+          "api",
+          "templates",
+          "middleware"
+        ],
         "displayName": "Express Map: App Analysis",
         "modelDescription": "Returns a structured summary of the Express.js application in the current workspace: all routes (method, path, file, line, template rendered, async flag, error handling), templates, broken template references (res.render calls pointing to missing files), async handlers without try/catch, duplicate routes, orphaned templates never referenced by any route, and global middleware. Use this when the user asks about their Express app's routing structure, API endpoints, template usage, or potential issues.",
         "canBeReferencedInPrompt": false,
