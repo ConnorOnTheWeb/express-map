@@ -28,6 +28,9 @@
     "url": "https://github.com/ConnorOnTheWeb/express-map/issues"
   },
   "homepage": "https://github.com/ConnorOnTheWeb/express-map#readme",
+  "sponsor": {
+    "url": "https://connorontheweb.com/pay"
+  },
   "engines": {
     "vscode": ">=1.60.0"
   },
